@@ -1,0 +1,25 @@
+node_modules/
+.next/
+.env
+.env.local
+!.env.example
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.venv/
+*.pyc
+.DS_Store
+uploads/
+
+# Additional local environment files
+.env.*
+!.env.example
+
+# Python build artifacts
+*.egg-info/
+dist/
+build/
+
+# Local development databases
+*.db
+*.sqlite3
