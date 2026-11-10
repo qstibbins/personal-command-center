@@ -1,0 +1,66 @@
+"use client";
+
+import { useActionState } from "react";
+
+import { createCapture } from "./actions";
+import { initialCaptureState } from "./capture-state";
+
+export function CaptureForm() {
+  const [state, formAction, isPending] = useActionState(
+    createCapture,
+    initialCaptureState,
+  );
+
+  return (
+    <form action={formAction} className="capture-form">
+      <label htmlFor="source_type">Type</label>
+      <select
+        id="source_type"
+        name="source_type"
+        defaultValue={state.values.source_type}
+        disabled={isPending}
+      >
+        <option value="text">Text</option>
+        <option value="url">URL</option>
+      </select>
+
+      <label htmlFor="title">Title (optional)</label>
+      <input
+        id="title"
+        name="title"
+        maxLength={300}
+        placeholder="What's on your mind?"
+        defaultValue={state.values.title}
+        readOnly={isPending}
+      />
+
+      <label htmlFor="content">Content</label>
+      <textarea
+        id="content"
+        name="content"
+        rows={5}
+        required
+        placeholder="Capture an idea, note, or link..."
+        defaultValue={state.values.content}
+        readOnly={isPending}
+      />
+
+      <button type="submit" disabled={isPending}>
+        {isPending ? "Saving…" : "Save Capture"}
+      </button>
+
+      <div aria-live="polite">
+        {state.status === "success" && (
+          <p className="form-message form-success" role="status">
+            {state.message}
+          </p>
+        )}
+        {state.status === "error" && (
+          <p className="form-message form-error" role="alert">
+            {state.message}
+          </p>
+        )}
+      </div>
+    </form>
+  );
+}

@@ -1,4 +1,4 @@
-import { createCapture } from "./actions";
+import { CaptureForm } from "./capture-form";
 
 const API_URL = process.env.API_INTERNAL_URL ?? "http://localhost:8000";
 
@@ -58,32 +58,7 @@ export default async function Home() {
       <section className="panel">
         <h2>Quick Capture</h2>
 
-        <form action={createCapture} className="capture-form">
-          <label htmlFor="source_type">Type</label>
-          <select id="source_type" name="source_type" defaultValue="text">
-            <option value="text">Text</option>
-            <option value="url">URL</option>
-          </select>
-
-          <label htmlFor="title">Title (optional)</label>
-          <input
-            id="title"
-            name="title"
-            maxLength={300}
-            placeholder="What's on your mind?"
-          />
-
-          <label htmlFor="content">Content</label>
-          <textarea
-            id="content"
-            name="content"
-            rows={5}
-            required
-            placeholder="Capture an idea, note, or link..."
-          />
-
-          <button type="submit">Save Capture</button>
-        </form>
+        <CaptureForm />
       </section>
 
       <section className="panel inbox">

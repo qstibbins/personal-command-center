@@ -71,3 +71,25 @@
   font-size: 0.75rem;
   text-transform: uppercase;
 }
+
+.capture-form button:disabled {
+  background: #8196bd;
+  cursor: not-allowed;
+}
+
+.form-message {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+.form-success {
+  background: #e8f6ee;
+  color: #1c6b3f;
+}
+
+.form-error {
+  background: #fdecec;
+  color: #a12626;
+}
