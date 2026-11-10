@@ -10,7 +10,7 @@ Build PCC as a persistent personal system of record: captures, knowledge, tasks,
 - Feature branch last reported: `feature/universal-capture`
 - Stack: Next.js 15 / React 19 (`apps/web`); FastAPI / Python (`apps/api`); PostgreSQL; Redis; RQ; SQLAlchemy; Alembic; Docker Compose; pnpm; uv.
 - Root compose file: `compose.yaml` (not `docker-compose.yml`).
-- API routes: `GET /health`, `POST /api/v1/captures`, `GET /api/v1/captures`.
+- API routes: `GET /api/v1/health`, `POST /api/v1/captures`, `GET /api/v1/captures`.
 - Capture model: UUID ID, source_type `text|url`, optional title, content, status, timestamps.
 
 ## Last confirmed working

@@ -23,3 +23,6 @@ build/
 # Local development databases
 *.db
 *.sqlite3
+
+# TypeScript build artifacts
+*.tsbuildinfo

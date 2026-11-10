@@ -12,7 +12,7 @@ Initial Next.js + FastAPI monorepo scaffold for a personal Second Brain and Chie
 
 ## Quick start
 
-Open **four Terminal tabs** from the repository root.
+Use several Terminal tabs (infrastructure/setup, API, web, and optionally the worker), starting from the repository root.
 
 1. **Infrastructure**: `cp .env.example .env` then `docker compose up -d`
 2. **Python dependencies and migrations**: `cd apps/api && uv sync --group dev && uv run alembic upgrade head`
@@ -41,13 +41,15 @@ uv run pytest
 uv run ruff check src tests
 ```
 
-At the root: `pnpm lint:web && pnpm build:web`.
+Backend database tests require `TEST_DATABASE_URL` pointing at a database named `pcc_test`; without it, those tests fail by design.
+
+At the root: `pnpm lint:web && pnpm test:web && pnpm build:web`.
 
 ## What is and isn't included
 
-Included: frontend shell, FastAPI health endpoint, SQLAlchemy models, initial Alembic migration, PostgreSQL, Redis, RQ worker, smoke test, CI, and ADRs.
+Included: a Universal Capture web form (text or URL, with pending, success, and error feedback) and an Inbox listing saved captures; FastAPI endpoints `GET /api/v1/health`, `POST /api/v1/captures`, and `GET /api/v1/captures`; SQLAlchemy models and Alembic migrations (`captures`, plus unused `projects` and `tasks` tables); PostgreSQL; Redis and an RQ worker with a demo job only; backend and frontend tests; CI; and ADRs. See `docs/ARCHITECTURE.md` for details.
 
-Not yet included: authentication, file uploads, object storage, task APIs, AI integrations, PWA offline support, production Dockerfiles, TLS, backups, and hardened security. **Do not expose this scaffold to the internet or upload private journal entries yet.**
+Not yet included: authentication, file uploads, object storage, task and project APIs, URL validation or fetching, capture processing, AI integrations, ChatGPT integration, ChatGPT history import, agents, PWA offline support, production Dockerfiles, TLS, backups, and hardened security. **Do not expose this scaffold to the internet or upload private journal entries yet.**
 
 ## Architecture
 
@@ -69,4 +71,4 @@ The database is the system of record; the worker is for slow tasks; the AI provi
 
 ## Next milestone
 
-Add authentication, capture domain models, a storage interface, upload validation, and a first capture endpoint.
+Browser-verify and commit the improved capture form, then add URL validation and frontend coverage, followed by authentication and a first private deployment. See `docs/ROADMAP.md`.
