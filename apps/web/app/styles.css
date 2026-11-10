@@ -1,1 +1,73 @@
 * { box-sizing: border-box; } body { margin: 0; font-family: system-ui, -apple-system, sans-serif; color: #172339; background: #f6f8fb; } main { max-width: 920px; margin: 10vh auto; padding: 24px; } h1 { font-size: clamp(2.5rem, 6vw, 4rem); letter-spacing: -.04em; margin: 12px 0; } h2 { margin-top: 0; } .eyebrow { color: #4968a3; font-weight: 700; font-size: .75rem; letter-spacing: .15em; } .intro, .muted { color: #66758c; } .intro { font-size: 1.15rem; margin-bottom: 36px; } .panel, article { background: white; border: 1px solid #e1e7f0; border-radius: 16px; padding: 24px; } .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px,1fr)); gap: 16px; margin-top: 16px; } article h3 { margin-top: 0; } article p { color: #66758c; }
+
+.capture-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.capture-form label {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.capture-form input,
+.capture-form select,
+.capture-form textarea {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #d4dce8;
+  border-radius: 8px;
+  font: inherit;
+  background: #fff;
+  color: #172339;
+}
+
+.capture-form button {
+  align-self: flex-start;
+  padding: 12px 20px;
+  background: #284d91;
+  color: white;
+  border: 0;
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.capture-form button:hover {
+  background: #19396e;
+}
+
+.inbox,
+.system-status {
+  margin-top: 20px;
+}
+
+.capture-list {
+  display: grid;
+  gap: 12px;
+}
+
+.capture-list article {
+  padding: 18px;
+}
+
+.capture-list article h3 {
+  margin: 12px 0 8px;
+}
+
+.capture-list article p {
+  margin-bottom: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.capture-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  color: #66758c;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+}
