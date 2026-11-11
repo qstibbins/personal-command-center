@@ -93,3 +93,13 @@
   background: #fdecec;
   color: #a12626;
 }
+
+.field-error {
+  margin: -4px 0 0;
+  font-size: 0.85rem;
+  color: #a12626;
+}
+
+.capture-form [aria-invalid="true"] {
+  border-color: #a12626;
+}

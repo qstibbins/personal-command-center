@@ -11,6 +11,9 @@ export function CaptureForm() {
     initialCaptureState,
   );
 
+  const titleError = state.fieldErrors?.title;
+  const contentError = state.fieldErrors?.content;
+
   return (
     <form action={formAction} className="capture-form">
       <label htmlFor="source_type">Type</label>
@@ -32,7 +35,14 @@ export function CaptureForm() {
         placeholder="What's on your mind?"
         defaultValue={state.values.title}
         readOnly={isPending}
+        aria-invalid={titleError ? true : undefined}
+        aria-describedby={titleError ? "title-error" : undefined}
       />
+      {titleError && (
+        <p id="title-error" className="field-error">
+          {titleError}
+        </p>
+      )}
 
       <label htmlFor="content">Content</label>
       <textarea
@@ -43,7 +53,14 @@ export function CaptureForm() {
         placeholder="Capture an idea, note, or link..."
         defaultValue={state.values.content}
         readOnly={isPending}
+        aria-invalid={contentError ? true : undefined}
+        aria-describedby={contentError ? "content-error" : undefined}
       />
+      {contentError && (
+        <p id="content-error" className="field-error">
+          {contentError}
+        </p>
+      )}
 
       <button type="submit" disabled={isPending}>
         {isPending ? "Saving…" : "Save Capture"}
