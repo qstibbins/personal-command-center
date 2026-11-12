@@ -1,17 +1,18 @@
 # Personal Command Center — Development Handoff
 
-_Last updated: 2026-11-12. Universal Capture v1 (Milestones 0–2) merged; Milestones 3.1–3.4 auth/API security on `main`; Milestone 3.5a Render deployment ADR accepted (docs only). Verify against the local repository before treating any item as complete._
+_Last updated: 2026-11-12. Universal Capture v1 (Milestones 0–2) merged; Milestones 3.1–3.4 auth/API security on `main`; Milestone 3.5a Render ADR on `main`; Milestone 3.5b Render deployment prep on `feat/m3-render-deployment-prep`. Verify against the local repository before treating any item as complete._
 
 ## Project goal
 Build PCC as a persistent personal system of record: captures, knowledge, tasks, projects, agent workflows, and outputs. Use both its own website (capture and dashboards) and, where supported, existing AI assistant apps (e.g., ChatGPT) as conversational interfaces. Preserve and eventually import useful historical ChatGPT conversations; do not assume automatic access to ChatGPT history or memory.
 
 ## Local environment
 - Repo: `/Users/quinton/Desktop/srccode/personal-command-center`
-- Branch: work happens on feature branches; `main` includes through Milestone 3.4 (`d608cee`, PR #6). Milestone 3.5a docs land via `docs/m3-render-deployment-design`.
+- Branch: work happens on feature branches; `main` includes through Milestone 3.5a (`94069ad`, PR #7). Milestone 3.5b lands via `feat/m3-render-deployment-prep`.
 - Stack: Next.js 15 / React 19 (`apps/web`); FastAPI / Python (`apps/api`); PostgreSQL; Redis; RQ; SQLAlchemy; Alembic; Docker Compose; pnpm; uv; Auth.js v5 (`next-auth` beta) + `@auth/pg-adapter`.
-- **Planned production host:** Render (ADR 0004) — public Next.js web service, private FastAPI, managed Postgres; Redis/worker **not** in v0.1.
+- **Production host (design + repo prep):** Render (ADR 0004 / M3.5b) — public Next.js web service, private FastAPI, managed Postgres; Redis/worker **not** in v0.1. Blueprint: `render.yaml` (do not apply without owner intent).
 - Root compose file: `compose.yaml` (not `docker-compose.yml`) — local/dev only.
-- API routes: `GET /api/v1/health`, `POST|GET /api/v1/captures`, `POST|GET /api/v1/api-tokens`, `POST /api/v1/api-tokens/{id}/revoke`.
+- API routes: `GET /api/v1/health`, `GET /api/v1/ready`, `POST|GET /api/v1/captures`, `POST|GET /api/v1/api-tokens`, `POST /api/v1/api-tokens/{id}/revoke`.
+- Web probe: `GET /api/health` (Render healthCheckPath).
 - Capture model: UUID ID, source_type `text|url`, optional title, content, status, timestamps.
 - Auth.js tables (Alembic `0003_authjs_tables`): `users`, `accounts`, `sessions`, `verification_token`.
 - API tokens table (Alembic `0004_api_tokens`): hashed bearer tokens with scopes, expiry, revocation.
@@ -21,9 +22,10 @@ Build PCC as a persistent personal system of record: captures, knowledge, tasks,
 - **Milestones 0–2** complete and merged (PR #1).
 - **Milestone 3.2** FastAPI Bearer service-credential auth + scopes merged (PR #4).
 - **Milestone 3.3** Auth.js v5 Google provider, PostgreSQL database sessions, verified-email allowlist, page/Server Action protection merged (PR #5).
-- **Milestone 3.4** scoped API tokens merged (PR #6): opaque `pcc_at_…` tokens; SHA-256 hashes only; scopes `captures:read` / `captures:write`; owner-only create/list/revoke at `/settings/api-tokens`.
-- **Milestone 3.5a (this work):** ADR 0004 — Render deployment architecture decision (documentation only; no Render resources, no Dockerfiles/`render.yaml` yet).
-- Automated checks as of M3.4 on `main`: frontend tests and backend pytest/ruff green; see prior PR notes for counts. M3.5a is docs-only (no test delta required).
+- **Milestone 3.4** scoped API tokens merged (PR #6).
+- **Milestone 3.5a** Render deployment ADR merged (PR #7).
+- **Milestone 3.5b (this work):** production Dockerfiles; `render.yaml` (web + private API + Postgres; no Redis); `PCC_ENV=production` disables `/docs`/`/redoc`/`/openapi.json`; `/api/v1/ready` Postgres check; Auth.js secure-cookie/`AUTH_URL` helpers; Alembic only on API `preDeployCommand`; deploy docs under `docs/deploy/`.
+- Automated checks for M3.5b (local): backend `uv run pytest` **97/97** with `pcc_test`; `ruff check` clean; `pnpm lint:web`; `pnpm test:web` **68/68**; `pnpm build:web` (standalone); `python3 scripts/validate_render_blueprint.py` OK. Docker image builds not run in this environment (no Docker daemon).
 - Capture UX/validation and M3.2–M3.4 auth behavior remain intact in code.
 
 ## Confirmed product priority (decision, 2026-11-12)
@@ -35,23 +37,22 @@ Build PCC as a persistent personal system of record: captures, knowledge, tasks,
 ## Known gaps (not blockers)
 - **No component-level automated regression coverage** for the capture form or token settings UI (Server Action + auth helpers are unit-tested).
 - **Real Google OAuth browser acceptance** for M3.3 still required (see `docs/google-signin-local.md`).
-- **Manual verification for M3.4:** sign in as allowlisted owner → create read-only and write-only tokens → confirm scope enforcement against FastAPI → revoke → confirm 401; confirm Universal Capture still works with the service credential.
+- **Manual verification for M3.4:** sign in as allowlisted owner → create/revoke tokens → confirm scope enforcement.
 - Multi-line text may store CRLF from browser form normalization.
 - CI still uses `pnpm install --no-frozen-lockfile`.
-- Shallow health check; migrations not covered by automated tests.
-- **No production containers or Render Blueprint in repo yet** (M3.5b).
+- Migrations not covered by automated tests (manual/preDeploy path documented).
+- **Docker image builds** not verified in the M3.5b agent environment (no Docker); verify locally or on first Render build.
+- Optional: request size limits / rate limiting not added in M3.5b.
 
 ## Immediate next step
-**Milestone 3.5a is complete (design).** Next is **Milestone 3.5b** per ADR 0004:
+**Milestone 3.5b repo prep is complete.** Remaining Milestone 3 work is **owner provisioning**:
 
-1. Containerize Next.js web + FastAPI (production Dockerfiles or equivalent Render build plans).
-2. Add repo-only Render Blueprint (`render.yaml`) wiring public web → private API → Postgres; do **not** create paid resources unless the owner asks.
-3. Production hardening: Postgres readiness, protect/disable `/docs`, prod env checklist (`AUTH_URL`, OAuth callbacks, service credential, internal `API_INTERNAL_URL`).
-4. Migrate / backup / rollback runbook text; restore drill waits for real infra.
+1. Create Render account/billing; intentionally apply `render.yaml` (creates paid resources).
+2. Set Dashboard secrets: `AUTH_URL`, Google OAuth, `PCC_ALLOWED_GOOGLE_EMAILS` (see `docs/deploy/production-env-checklist.md`).
+3. Deploy API first (Alembic preDeploy) then confirm web; run OAuth + capture acceptance.
+4. Backup/restore drill per `docs/deploy/render-runbook.md` (PITR recovery instances are billed until deleted).
 
-**Owner actions (cannot be done by agents alone):** Render account + billing, domain, live secrets, Google production OAuth URIs, first deploy, OAuth/browser acceptance, backup restore drill.
-
-ChatGPT iPhone feasibility stays a **Milestone 4** gate. Do **not** expose FastAPI publicly “for ChatGPT,” and do **not** wire ChatGPT to API tokens until that gate passes.
+ChatGPT iPhone feasibility stays a **Milestone 4** gate. Do **not** expose FastAPI publicly, and do **not** wire ChatGPT to API tokens until that gate passes.
 
 ## Deployment sequence
 1. ~~Finish capture UX and tests.~~ Done.
@@ -60,8 +61,8 @@ ChatGPT iPhone feasibility stays a **Milestone 4** gate. Do **not** expose FastA
 4. ~~Milestone 3.3 Auth.js / Google website auth + session protection.~~ Done in code (browser OAuth acceptance pending).
 5. ~~Milestone 3.4 scoped / revocable API tokens.~~ Done in code (manual token check pending).
 6. ~~Milestone 3.5a Render deployment architecture.~~ Done (ADR 0004).
-7. **Milestone 3.5b:** repo deploy prep (Dockerfiles, Blueprint, hardening, runbooks).
-8. Owner provisions Render; migrate; verify auth, capture, restart persistence, backup/restore.
+7. ~~Milestone 3.5b repo deploy prep.~~ Done (Dockerfiles, Blueprint, hardening, runbooks).
+8. **Owner** provisions Render; migrate; verify auth, capture, restart persistence, backup/restore.
 9. **Milestone 4:** verify then build ChatGPT↔PCC integration.
 
 ## Integration principles
@@ -84,4 +85,4 @@ Editable Hatchling install may have a `.pth` file in `apps/api/.venv/lib/python3
 - If troubleshooting becomes unrelated, record it as a separate issue and return to the milestone.
 
 ## Suggested opening message for a new chat
-"We are continuing my Personal Command Center project. Read `docs/HANDOFF.md` first. Auth through Milestone 3.4 is on `main`; Milestone 3.5a selected Render (ADR 0004). Next: Milestone 3.5b repo deploy prep — Dockerfiles, Blueprint, deep health, runbooks — without provisioning Render unless I ask. Give me one precise step at a time."
+"We are continuing my Personal Command Center project. Read `docs/HANDOFF.md` first. Auth through M3.4 and Render ADR (M3.5a) are on `main`; M3.5b deploy prep is on `feat/m3-render-deployment-prep` (confirm PR). Next: owner Render provisioning per `docs/deploy/render-runbook.md` — do not buy/apply Blueprint unless I ask. Give me one precise step at a time."

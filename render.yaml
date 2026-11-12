@@ -1,0 +1,86 @@
+# Personal Command Center — Render Blueprint (ADR 0004 / Milestone 3.5b)
+#
+# Repo-only preparation. Applying this Blueprint in the Render Dashboard
+# creates paid resources — do that only when the owner intentionally provisions.
+#
+# Topology:
+#   - Public HTTPS Next.js web service (pcc-web)
+#   - Private FastAPI service (pcc-api) — NOT publicly reachable
+#   - Managed Postgres (pcc-db), private ACL
+#   - No Redis / worker (deferred)
+#
+# Secrets: never hardcode. sync:false prompts in Dashboard; generateValue
+# creates a platform secret once. Google OAuth values stay owner-provided.
+
+services:
+  - type: web
+    name: pcc-web
+    runtime: docker
+    plan: 0.5c-512mb
+    region: oregon
+    dockerfilePath: ./apps/web/Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PCC_ENV
+        value: production
+      - key: AUTH_SECRET
+        generateValue: true
+      # Canonical public https:// origin (custom domain or onrender.com).
+      - key: AUTH_URL
+        sync: false
+      - key: AUTH_GOOGLE_ID
+        sync: false
+      - key: AUTH_GOOGLE_SECRET
+        sync: false
+      - key: PCC_ALLOWED_GOOGLE_EMAILS
+        sync: false
+      # Same credential as the API (generated on pcc-api).
+      - key: PCC_SERVICE_CREDENTIAL
+        fromService:
+          name: pcc-api
+          type: pserv
+          envVarKey: PCC_SERVICE_CREDENTIAL
+      # Private-network host:port → apps/web/app/api.ts prefixes http://
+      - key: API_INTERNAL_HOSTPORT
+        fromService:
+          name: pcc-api
+          type: pserv
+          property: hostport
+      # Auth.js database sessions share the app Postgres (internal URL).
+      - key: DATABASE_URL
+        fromDatabase:
+          name: pcc-db
+          property: connectionString
+
+  - type: pserv
+    name: pcc-api
+    runtime: docker
+    plan: 0.5c-512mb
+    region: oregon
+    dockerfilePath: ./apps/api/Dockerfile
+    dockerContext: ./apps/api
+    # Single migration owner — do not also migrate from the web service.
+    # Failure cancels the new deploy; the previous API instance keeps serving.
+    preDeployCommand: alembic upgrade head
+    envVars:
+      - key: PCC_ENV
+        value: production
+      - key: PCC_SERVICE_CREDENTIAL
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: pcc-db
+          property: connectionString
+
+databases:
+  - name: pcc-db
+    # Paid basic plan — Free Postgres expires and lacks PITR (ADR 0004).
+    # Plan ID 0.1c-256mb (legacy name: basic-256mb).
+    plan: 0.1c-256mb
+    region: oregon
+    postgresMajorVersion: "16"
+    # Private network only — no public 0.0.0.0/0 access.
+    ipAllowList: []
