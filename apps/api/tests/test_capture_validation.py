@@ -1,10 +1,6 @@
 import pytest
-from fastapi.testclient import TestClient
 
-from pcc.main import app
 from pcc.schemas.capture import MAX_TEXT_LENGTH, MAX_URL_LENGTH
-
-client = TestClient(app)
 
 VALID_URLS = [
     "https://example.com",
@@ -91,29 +87,29 @@ def test_url_at_max_length_is_accepted(db_client):
 
 
 @pytest.mark.parametrize("url", INVALID_URLS)
-def test_invalid_urls_are_rejected(url):
-    assert_content_error(post(client, "url", url))
+def test_invalid_urls_are_rejected(url, db_client):
+    assert_content_error(post(db_client, "url", url))
 
 
 @pytest.mark.parametrize("url", CREDENTIAL_URLS)
-def test_urls_with_credentials_are_rejected(url):
-    assert_content_error(post(client, "url", url), "username or password")
+def test_urls_with_credentials_are_rejected(url, db_client):
+    assert_content_error(post(db_client, "url", url), "username or password")
 
 
-def test_url_over_max_length_is_rejected():
+def test_url_over_max_length_is_rejected(db_client):
     url = "https://example.com/" + "a" * (MAX_URL_LENGTH - len("https://example.com/") + 1)
 
-    assert_content_error(post(client, "url", url), "2048")
+    assert_content_error(post(db_client, "url", url), "2048")
 
 
-def test_invalid_url_message_mentions_http():
-    assert_content_error(post(client, "url", "ftp://example.com"), "http")
+def test_invalid_url_message_mentions_http(db_client):
+    assert_content_error(post(db_client, "url", "ftp://example.com"), "http")
 
 
 @pytest.mark.parametrize("content", ["", "   ", "\n\t "])
 @pytest.mark.parametrize("source_type", ["text", "url"])
-def test_blank_content_is_rejected_on_the_content_field(source_type, content):
-    assert_content_error(post(client, source_type, content), "blank")
+def test_blank_content_is_rejected_on_the_content_field(source_type, content, db_client):
+    assert_content_error(post(db_client, source_type, content), "blank")
 
 
 def test_rejected_url_is_not_persisted(db_client):
@@ -145,8 +141,8 @@ def test_text_at_max_length_is_accepted(db_client):
     assert response.status_code == 201
 
 
-def test_text_over_max_length_is_rejected():
-    assert_content_error(post(client, "text", "a" * (MAX_TEXT_LENGTH + 1)), "100,000")
+def test_text_over_max_length_is_rejected(db_client):
+    assert_content_error(post(db_client, "text", "a" * (MAX_TEXT_LENGTH + 1)), "100,000")
 
 
 def test_text_length_limit_applies_after_trimming(db_client):
@@ -164,8 +160,8 @@ def test_title_is_trimmed_and_blank_title_becomes_null(db_client):
     assert blank.json()["title"] is None
 
 
-def test_title_over_300_characters_is_rejected():
-    response = post(client, "text", "note", title="t" * 301)
+def test_title_over_300_characters_is_rejected(db_client):
+    response = post(db_client, "text", "note", title="t" * 301)
 
     assert response.status_code == 422
     assert response.json()["detail"][0]["loc"] == ["body", "title"]

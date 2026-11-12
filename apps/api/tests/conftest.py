@@ -12,6 +12,19 @@ from pcc.db.base import Base
 from pcc.main import app
 
 
+def _database_disabled():
+    raise RuntimeError("Use the db_client fixture for tests that reach the database")
+    yield  # pragma: no cover
+
+
+@pytest.fixture(autouse=True)
+def block_unisolated_database():
+    """Fail loudly if any test reaches get_db without the isolated pcc_test fixture."""
+    app.dependency_overrides[get_db] = _database_disabled
+    yield
+    app.dependency_overrides.pop(get_db, None)
+
+
 @pytest.fixture
 def db_client():
     database_url = os.environ.get("TEST_DATABASE_URL")

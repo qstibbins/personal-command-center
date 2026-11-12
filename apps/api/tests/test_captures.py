@@ -1,29 +1,21 @@
-
-from fastapi.testclient import TestClient
-
-from pcc.main import app
-
-client = TestClient(app)
-
-
-def test_reject_blank_capture():
-    response = client.post(
+def test_reject_blank_capture(db_client):
+    response = db_client.post(
         "/api/v1/captures",
         json={"source_type": "text", "content": "   "},
     )
     assert response.status_code == 422
 
 
-def test_reject_invalid_source_type():
-    response = client.post(
+def test_reject_invalid_source_type(db_client):
+    response = db_client.post(
         "/api/v1/captures",
         json={"source_type": "unknown", "content": "Test capture"},
     )
     assert response.status_code == 422
 
 
-def test_reject_missing_content():
-    response = client.post(
+def test_reject_missing_content(db_client):
+    response = db_client.post(
         "/api/v1/captures",
         json={"source_type": "text"},
     )
