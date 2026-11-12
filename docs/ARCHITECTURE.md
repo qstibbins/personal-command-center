@@ -1,7 +1,7 @@
 # Personal Command Center (PCC) — Architecture
 
-**Last updated:** 2026-11-09
-**Branch inspected:** `feature/universal-capture` (working tree includes uncommitted capture-form changes)
+**Last updated:** 2026-11-12 (reconciled with `ROADMAP.md` and `HANDOFF.md` after Universal Capture v1 was merged)
+**Branch inspected:** `main` at `636c026` (Universal Capture v1, PR #1, merged)
 
 ## How to read this document
 
@@ -141,7 +141,7 @@ apps/web/
     capture-form.tsx      # "use client" form (useActionState)
     capture-state.ts      # CaptureFormState type + initialCaptureState
     actions.ts            # "use server" createCapture
-    actions.test.ts       # 4 Vitest tests of createCapture
+    actions.test.ts       # 27 Vitest tests of createCapture
     styles.css            # global CSS (no CSS framework)
 ```
 
@@ -185,14 +185,14 @@ Prerequisites per README: Docker, Node 22, pnpm 10.11.0, Python 3.12+, `uv`.
 | Backend tests | `TEST_DATABASE_URL=<url to pcc_test> uv run pytest` | `apps/api` |
 | Backend lint | `uv run ruff check src tests` | `apps/api` |
 
-**Backend test design:** validation-failure tests (blank, bad enum, invalid or oversized URLs, over-length text or title) use no database because they fail before any DB access. Tests that save a capture (`test_create_capture`, `test_list_captures`, and the accepted-input cases in `test_capture_validation.py`) use the `db_client` fixture. It refuses to run unless `TEST_DATABASE_URL` is set and the database name is exactly `pcc_test`. It then runs `Base.metadata.create_all` and `drop_all` around each test and overrides `get_db`. The tests therefore build schema from the models and **do not exercise the Alembic migrations**. CI provisions `pcc_test` through a Postgres service container; locally it must be created manually.
+**Backend test design:** all API endpoint tests in `test_captures.py` and `test_capture_validation.py` run through the `db_client` fixture. It refuses to run unless `TEST_DATABASE_URL` is set and the database name is exactly `pcc_test`. An autouse override blocks unisolated `get_db` usage so tests cannot accidentally hit development/production databases. The fixture runs `Base.metadata.create_all` and `drop_all` around each test and overrides `get_db`. The tests therefore build schema from the models and **do not exercise the Alembic migrations**. CI provisions `pcc_test` through a Postgres service container; locally it must be created manually.
 
 **Frontend test design:** only the Server Action is tested (success and reset, 422 field-error mapping, generic fallbacks for malformed bodies, 5xx and network failures, blank content, and the `source_type` returned to the form). `fetch` and `next/cache` are mocked in Vitest's default Node environment. There are no component tests, browser tests, or Vitest config file.
 
 **CI (`.github/workflows/ci.yml`)** runs on every push and PR:
 - Backend job: `uv sync`, `uv run pytest`, `uv run ruff check`.
-- Frontend job: `pnpm install --no-frozen-lockfile`, `pnpm lint:web`, `pnpm build:web`.
-- See Part C for gaps (no Postgres service, no frontend tests step).
+- Frontend job: `pnpm install --no-frozen-lockfile`, `pnpm lint:web`, `pnpm test:web`, `pnpm build:web`.
+- See Part C for remaining gaps (for example migration coverage and local `pcc_test` setup).
 
 ## A9. Verified architectural decisions
 
@@ -201,7 +201,7 @@ Prerequisites per README: Docker, Node 22, pnpm 10.11.0, Python 3.12+, `uv`.
 | **ADR 0001:** Monorepo, modular monolith; HTTP API and worker from the same Python package | Implemented. `apps/web` + `apps/api`; the worker is in the `pcc.worker` package. |
 | **ADR 0002:** PostgreSQL for structured state; file originals outside DB behind a storage abstraction | PostgreSQL is implemented. **File storage is not**: no abstraction, uploads, or upload directory (the `.gitignore` lists `uploads/` only). Status is "Proposed". |
 | Web calls the API server-side only | Implemented (Server Action and server component). |
-| Keep the existing Server Action + FastAPI architecture for capture UX | Implemented in the current uncommitted working tree. |
+| Keep the existing Server Action + FastAPI architecture for capture UX | Implemented and merged to `main` (PR #1). |
 | `packages/api-client` reserved for OpenAPI-generated client | **Placeholder only** (a README). The web app hand-writes its types. |
 | Tests protect real data via `pcc_test` guard | Implemented in `conftest.py`. |
 
@@ -209,11 +209,12 @@ Prerequisites per README: Docker, Node 22, pnpm 10.11.0, Python 3.12+, `uv`.
 
 | Item | Status |
 |---|---|
-| Source, config, migrations, tests, CI and Compose were read for this document | Done |
-| Frontend `pnpm lint`, `pnpm test` (4/4), `pnpm build` | Passed earlier in this working session, before this document was written, on the current working tree |
-| Backend tests, `ruff`, Alembic migrations, Docker Compose services | **Not run for this document.** The six backend tests are reported passing in `HANDOFF.md`, but that is not independently confirmed here. |
-| Browser acceptance of the updated capture form | **Not performed.** The user's dev server hit stale-build errors after a `next build` ran against the same `.next` directory. |
-| Uncommitted state | The capture-form work (`actions.ts`, `page.tsx`, `styles.css`, `capture-form.tsx`, `capture-state.ts`, `actions.test.ts`) is uncommitted. `docs/PROJECT.md` and `docs/ROADMAP.md` are untracked. |
+| Source, config, migrations, tests, CI and Compose were read for this document | Done (original review 2026-11-09; capture sections updated 2026-11-12) |
+| Frontend `pnpm lint:web`, `pnpm test:web` (27 Server Action tests), `pnpm build:web` | Passed locally and in GitHub Actions on PR #1 |
+| Backend `uv run pytest` (61 tests, using `pcc_test` Postgres) and `ruff check src tests` | Passed locally and in GitHub Actions on PR #1 (CI provisions Postgres 17 as a service container) |
+| Alembic migrations, Docker Compose services | **Still not exercised by any test.** Migrations were applied by hand to a local dev database during browser testing only. |
+| Browser acceptance of the capture form | **Performed 2026-11-12** in real Chrome against the full stack (invalid URL field error, correction without reselecting Type, text capture, backend-down generic error with input kept, success reset). Evidence is in the Project store `media/`. The "Saving…" pending state and whitespace-only submit were not observed in the browser. |
+| Uncommitted state | None. Capture work and the docs are committed; Universal Capture v1 is merged to `main`. |
 
 ---
 
@@ -221,12 +222,12 @@ Prerequisites per README: Docker, Node 22, pnpm 10.11.0, Python 3.12+, `uv`.
 
 Everything below comes from `PROJECT.md`, `ROADMAP.md`, `HANDOFF.md` and ADR 0002. There is no corresponding code. Treat it as intent that may change.
 
-## B1. Authentication and production deployment (Roadmap M3–M4)
-Planned: single-user auth protecting both UI and API, secure secrets, HTTPS, persistent Postgres with backups, and health checks. A small VPS with Docker Compose is "a candidate, not a final decision." **Today:** no auth, no production configuration, no Dockerfiles, and a health endpoint that checks nothing downstream.
+## B1. Authentication, API security, and minimal private deployment (Roadmap M3)
+Planned: single-user auth protecting both UI and API, secure secrets, HTTPS, persistent Postgres with backups, and health checks, in a minimal private deployment designed so remote access can be added later (Roadmap M3 combines the former M3 and M4). The first step is an architecture assessment (see `HANDOFF.md`). A small VPS with Docker Compose is "a candidate, not a final decision." **Today:** no auth, no production configuration, no Dockerfiles, and a health endpoint that checks nothing downstream.
 
-## B2. ChatGPT ↔ PCC integration (Roadmap M5)
+## B2. ChatGPT ↔ PCC integration (Roadmap M4)
 Planned: let the standard ChatGPT app (including iPhone) save and retrieve PCC data through a supported, authenticated tool/MCP-style interface.
-- **Feasibility is unverified.** The roadmap makes it an explicit gate: confirm what the account/client supports before building.
+- **Feasibility is unverified.** The roadmap makes it an explicit gate: confirm the supported mechanism, iPhone availability, authentication requirements, and network accessibility before building. The first goal is a capture created from the standard ChatGPT iPhone app that appears in the Inbox. It depends on Milestone 3.
 - **No code exists:** no MCP server, tool endpoints, OAuth, or ChatGPT-specific adapter.
 - PCC calling an AI provider's API is a different direction and is also not implemented.
 
@@ -241,7 +242,7 @@ Planned: Redis/RQ processing of captures, an AI-provider abstraction with budget
 - **Not implemented:** capture-processing jobs, enqueueing from the API, provider abstraction, agents, threads, runs, approvals, dashboards, or any LLM call. `PROJECT.md` itself says these are requirements, not existing models.
 
 ## B5. Other planned items
-- Knowledge search/retrieval, projects, tasks UI/API, briefings.
+- Task, project, and knowledge capabilities (Roadmap M5): knowledge search/retrieval, projects, tasks UI/API; briefings.
 - File upload and a storage abstraction (ADR 0002, Proposed).
 - A generated TypeScript API client (`packages/api-client`).
 
@@ -260,17 +261,17 @@ Planned: Redis/RQ processing of captures, an AI-provider abstraction with budget
 | 5 | `ADR 0001`: "Organize backend code by business capability" | Backend is organized **by layer** (`api/`, `schemas/`, `services/`, `db/`). With one domain this is fine, but it differs from the stated intent. |
 | 6 | `ADR 0002`: storage abstraction and local-disk uploads | Not implemented (ADR is "Proposed"). `README.md` correctly lists uploads as not included. |
 | 7 | `.env.example` documents `API_CORS_ORIGINS` and `NEXT_PUBLIC_API_BASE_URL` | Neither is read by any code. The code uses `API_INTERNAL_URL` and `TEST_DATABASE_URL`, which `.env.example` omits. |
-| 8 | `PROJECT.md` §6 lists the capture form as reported/not inspected | Confirmed in source: the pending, success, error and reset code exists and its action tests pass. Browser behavior is still unverified. |
-| 9 | `ROADMAP.md` M1: "Address generated `tsconfig.tsbuildinfo` ignore rule" | Confirmed still open: the file is untracked and `.gitignore` has no pattern for it. |
+| 8 | `PROJECT.md` §6 listed the capture form as reported/not inspected | **Resolved 2026-11-12:** `PROJECT.md` §6 updated; the form passed browser acceptance and is merged. |
+| 9 | `ROADMAP.md` M1: "Address generated `tsconfig.tsbuildinfo` ignore rule" | **Resolved:** `.gitignore` contains `*.tsbuildinfo`, and `ROADMAP.md` M1 marks it done. |
 | 10 | `PROJECT.md` says agent/thread/run models are future requirements | Correct. However, `projects` and `tasks` tables **do** exist (migration `0001_initial`) with no API or UI. No doc describes this. |
-| 11 | `docs/PROJECT.md` and `docs/ROADMAP.md` are presented as living specs | They were **untracked** in Git. Decision: add once verified; both checked against the code and staged (not committed) on 2026-11-09. |
+| 11 | `docs/PROJECT.md` and `docs/ROADMAP.md` are presented as living specs | **Resolved:** both are tracked in Git on `main`. |
 
 ## C2. Likely problems found in configuration (not run, inferred from files)
 
-1. **CI backend job probably fails.** `ci.yml` has no PostgreSQL service and sets no `TEST_DATABASE_URL`. `conftest.py` calls `pytest.fail` when that is missing, so the two `db_client` tests would fail in CI. This needs confirmation by looking at an actual CI run.
-2. **CI skips frontend tests.** The frontend job runs `lint:web` and `build:web` but not `test:web`, so the new action tests would not run in CI.
+1. **CI backend job failed (resolved).** `ci.yml` had no PostgreSQL service and no `TEST_DATABASE_URL`, so the `db_client` tests errored in CI (confirmed on PR #1). `ci.yml` now starts a `postgres:17-alpine` service that creates `pcc_test` and sets `TEST_DATABASE_URL`; backend CI passes.
+2. **CI skipped frontend tests (resolved).** The frontend job now runs `test:web` between `lint:web` and `build:web`.
 3. **`make test` fails without `TEST_DATABASE_URL`** for the same reason as (1).
-4. **`pcc_test` is never created by repo tooling.** Compose creates only `pcc`, and nothing documents creating `pcc_test`.
+4. **Local `pcc_test` is still not created by repo tooling.** Compose creates only `pcc`, so developers must create `pcc_test` manually (CI creates it through its service container).
 5. **Migrations are untested.** Tests use `create_all`, so a migration/model mismatch would not be caught.
 6. **Health check is shallow.** It reports `ok` without verifying PostgreSQL or Redis.
 7. **Capture status never leaves `pending`**, and capture creation does not enqueue any job. The Inbox's "status" is therefore always `pending`.
@@ -279,11 +280,11 @@ Planned: Redis/RQ processing of captures, an AI-provider abstraction with budget
 
 ## C3. Unresolved questions
 
-- Does the standard ChatGPT app (especially on iPhone) support a custom tool/MCP integration for this account, and with what authentication? (Roadmap M5 gate; `PROJECT.md` open question.)
+- Does the standard ChatGPT app (especially on iPhone) support a custom tool/MCP integration for this account, and with what authentication? (Roadmap M4 feasibility gate; `PROJECT.md` open question.)
 - What ChatGPT export format and metadata will actually be importable, and does it include memory? No real export has been inspected.
-- Should URL captures be fetched or enriched, or remain plain strings? What are the accepted schemes? (Roadmap M2.)
-- Which authentication approach fits a single-user deployment, and how will the Next.js server authenticate to FastAPI? (Roadmap M3.)
-- How should backend CI obtain a Postgres `pcc_test` database? A Compose service, a GitHub Actions service container, or a mocked layer are all possible, and none is chosen.
+- ~~Should URL captures be fetched or enriched, and what schemes are accepted?~~ **Answered in Roadmap M2:** only absolute `http`/`https` URLs are accepted and stored as the trimmed original string; remote content is not fetched. If server-side fetching is ever added, it needs SSRF controls (accepted URLs may point at localhost or private hosts).
+- Which authentication approach fits a single-user deployment, and how will the Next.js server authenticate to FastAPI? (Roadmap M3; this is the first step of the M3 architecture assessment in `HANDOFF.md`.)
+- ~~How should backend CI obtain a Postgres `pcc_test` database?~~ **Answered:** a GitHub Actions Postgres service container.
 - What is the intended lifecycle of capture status values (`processing`, `processed`, `failed`), and which component owns the transitions?
 - Should `projects` and `tasks` be kept, reshaped, or removed given that nothing uses them yet?
 - Does the backend need a CORS policy, or should `API_CORS_ORIGINS` / `NEXT_PUBLIC_API_BASE_URL` be removed from `.env.example`?
