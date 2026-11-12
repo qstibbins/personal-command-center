@@ -225,6 +225,8 @@ Everything below comes from `PROJECT.md`, `ROADMAP.md`, `HANDOFF.md` and ADR 000
 ## B1. Authentication, API security, and minimal private deployment (Roadmap M3)
 Planned: single-user auth protecting both UI and API, secure secrets, HTTPS, persistent Postgres with backups, and health checks, in a minimal private deployment designed so remote access can be added later (Roadmap M3 combines the former M3 and M4). The first step is an architecture assessment (see `HANDOFF.md`). A small VPS with Docker Compose is "a candidate, not a final decision." **Today:** no auth, no production configuration, no Dockerfiles, and a health endpoint that checks nothing downstream.
 
+Architecture decision status (planning, not implemented): `docs/decisions/0003-m3-auth-security-design.md` accepts Google sign-in with an explicit allowlist, Auth.js as the preferred Next.js auth library, FastAPI-enforced API authorization, a server-side Next.js→FastAPI service credential, scoped revocable API tokens for future integrations, and a private HTTPS-first deployment baseline. The ADR also records unresolved deployment and ChatGPT-feasibility dependencies.
+
 ## B2. ChatGPT ↔ PCC integration (Roadmap M4)
 Planned: let the standard ChatGPT app (including iPhone) save and retrieve PCC data through a supported, authenticated tool/MCP-style interface.
 - **Feasibility is unverified.** The roadmap makes it an explicit gate: confirm the supported mechanism, iPhone availability, authentication requirements, and network accessibility before building. The first goal is a capture created from the standard ChatGPT iPhone app that appears in the Inbox. It depends on Milestone 3.
@@ -283,7 +285,7 @@ Planned: Redis/RQ processing of captures, an AI-provider abstraction with budget
 - Does the standard ChatGPT app (especially on iPhone) support a custom tool/MCP integration for this account, and with what authentication? (Roadmap M4 feasibility gate; `PROJECT.md` open question.)
 - What ChatGPT export format and metadata will actually be importable, and does it include memory? No real export has been inspected.
 - ~~Should URL captures be fetched or enriched, and what schemes are accepted?~~ **Answered in Roadmap M2:** only absolute `http`/`https` URLs are accepted and stored as the trimmed original string; remote content is not fetched. If server-side fetching is ever added, it needs SSRF controls (accepted URLs may point at localhost or private hosts).
-- Which authentication approach fits a single-user deployment, and how will the Next.js server authenticate to FastAPI? (Roadmap M3; this is the first step of the M3 architecture assessment in `HANDOFF.md`.)
+- ~~Which authentication approach fits a single-user deployment, and how will the Next.js server authenticate to FastAPI?~~ **Answered in ADR 0003:** Google sign-in with an allowlist, Auth.js preferred for web sessions, and a server-side service credential for Next.js→FastAPI plus scoped/revocable API tokens for non-browser clients.
 - ~~How should backend CI obtain a Postgres `pcc_test` database?~~ **Answered:** a GitHub Actions Postgres service container.
 - What is the intended lifecycle of capture status values (`processing`, `processed`, `failed`), and which component owns the transitions?
 - Should `projects` and `tasks` be kept, reshaped, or removed given that nothing uses them yet?

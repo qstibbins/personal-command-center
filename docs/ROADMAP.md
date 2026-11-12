@@ -88,13 +88,13 @@ Delivered:
 
 ## Milestone 3 — Authentication, API security, and minimal private deployment
 
-**Status: Planned. Next action: finish the architecture assessment (below).** This milestone combines the former Milestone 3 (authentication and production readiness) and Milestone 4 (first private deployment, v0.1).
+**Status: Planned. Architecture decisions for Milestone 3.1 are recorded in `docs/decisions/0003-m3-auth-security-design.md`; next action is implementation and verification.** This milestone combines the former Milestone 3 (authentication and production readiness) and Milestone 4 (first private deployment, v0.1).
 
 **Design constraint: designed for future remote access.** The first deployment may be minimal and private, but it must not assume that the only client is a browser on the same machine. Choices made here should keep a later internet-reachable, HTTPS-protected endpoint possible without redesign, because Milestone 4 requires one (to be verified). In particular: no hard-coded `localhost` assumptions, configurable public/internal base URLs and allowed origins, and API authentication that a non-browser client can use.
 
 ### Architecture assessment (first step, before implementation)
-- [ ] Choose a simple authentication approach appropriate for a single-user private deployment (website sign-in plus API credentials), and record it as a decision under `docs/decisions/`.
-- [ ] Decide how the Next.js server authenticates to FastAPI (today it calls the API unauthenticated) and how non-browser clients, such as a future ChatGPT integration, would authenticate.
+- [x] Choose a simple authentication approach appropriate for a single-user private deployment (website sign-in plus API credentials), and record it as a decision under `docs/decisions/` (`0003-m3-auth-security-design.md`): Google sign-in, Auth.js (preferred) for web sessions, FastAPI-enforced authorization, server-side Next.js→FastAPI service credential, and scoped revocable API tokens for future integrations.
+- [x] Decide how the Next.js server authenticates to FastAPI and how non-browser clients authenticate: server-side service credential for Next.js→FastAPI plus scoped/revocable bearer API tokens for future integrations (see `docs/decisions/0003-m3-auth-security-design.md`).
 - [ ] Choose the hosting target and network exposure model (small VPS + Docker Compose is a candidate, not a final decision; private-only versus a public HTTPS endpoint with auth).
 - [ ] Inventory what production needs that does not exist yet: Dockerfiles, production config, secrets handling, deep health checks, request size limits and rate limiting, CORS/origin policy, migration procedure, backups.
 
@@ -109,6 +109,8 @@ Delivered:
 - [ ] Verify backup/recovery and document repeatable deploy, rollback, recovery, and access steps.
 
 **Exit criterion:** PCC is deployed at a secure private URL without exposing personal captures or unauthenticated write endpoints, the capture workflow survives a restart, and nothing in the design blocks later remote access.
+
+**Open dependencies before implementation closes Milestone 3:** final private ingress model (VPN/private endpoint vs public HTTPS + strict auth), secret rotation operations, and Milestone 4 feasibility-gate findings for ChatGPT iPhone integration support and required network/auth assumptions.
 
 ## Milestone 4 — ChatGPT ↔ PCC integration
 

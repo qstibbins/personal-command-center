@@ -46,7 +46,9 @@ Details: Project store `docs/predeployment-stabilization-notes.md`.
 - Future risk to design for if URLs are ever fetched server-side: accepted URLs include localhost/private hosts, so fetching would need SSRF controls.
 
 ## Immediate next step
-**Finish the Milestone 3 architecture assessment** (no implementation yet). Produce a short decision record (suggested location `docs/decisions/`) covering: the single-user authentication approach for the website and API; how the Next.js server authenticates to FastAPI and how non-browser clients would authenticate; the hosting target and network exposure model; and the inventory of missing production pieces (Dockerfiles, secrets, deep health checks, request limits/rate limiting, CORS/origin policy, migrations, backups). Keep it compatible with future remote access. Then plan Milestone 3 implementation from that assessment.
+**Milestone 3.1 architecture decisions are now documented** in `docs/decisions/0003-m3-auth-security-design.md` (Google sign-in with explicit allowlist, Auth.js preferred, FastAPI-enforced API auth, server-side service credential for Next.js→FastAPI, scoped revocable API tokens, private HTTPS-first deployment baseline).  
+
+Next step: implement Milestone 3 authentication and API protection according to ADR 0003, then verify with acceptance checks (allowlist enforcement, secure sessions, unauthorized API denial, service-credential enforcement, scoped token revocation behavior). Keep unresolved dependencies explicit while implementing: final ingress model choice and Milestone 4 ChatGPT feasibility-gate findings.
 
 ## Deployment sequence
 1. ~~Finish capture UX and tests.~~ Done (Universal Capture v1).
