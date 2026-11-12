@@ -1,7 +1,7 @@
 # Personal Command Center (PCC) — Product Vision and Requirements
 
 **Status:** Living product specification  
-**Last updated:** 2026-11-09  
+**Last updated:** 2026-11-12  
 **Basis:** PCC discussions in ChatGPT and the existing development handoff. This document describes product intent, not proof that a capability has been implemented.
 
 ## 1. Vision
@@ -86,17 +86,17 @@ These concepts are **requirements for future design**, not claims that their dat
 
 These are illustrative domains, not a commitment to implement every integration or workflow in the first release.
 
-## 6. What exists today (reported, not independently inspected)
+## 6. What exists today
 
-As of the latest Cursor report:
+As of 2026-11-12 (Universal Capture v1, merged to `main` as PR #1):
 - Next.js / React web application and FastAPI backend with PostgreSQL persistence.
-- Text/URL capture API and an Inbox listing captures.
-- Web form successfully saved a capture in an earlier browser test.
-- Cursor subsequently implemented pending, success, error, and reset behavior; reported passing frontend lint, four action tests, and production build.
-- **The updated form has not yet passed browser acceptance testing.**
+- Text and URL capture through the website, with an Inbox listing captures. The form shows pending, success, and error states, field-level validation errors, and resets only on success. FastAPI validates and trims input; URL captures accept only absolute `http`/`https` URLs, and remote content is not fetched.
+- Automated tests: 27 frontend Server Action tests and 61 backend tests (Postgres `pcc_test`), run in CI. There are no component-level frontend tests.
+- The capture form passed browser acceptance in real Chrome on 2026-11-12.
+- No authentication exists yet: neither the website nor the API is protected, so PCC is not safe to expose beyond a local machine.
 - Redis/RQ infrastructure exists, but AI processing and agent orchestration are not yet implemented.
 
-The repository, test runs, and browser checks remain the authoritative implementation evidence.
+The repository, test runs, and browser checks remain the authoritative implementation evidence. `docs/ROADMAP.md` has the current sequence and `docs/HANDOFF.md` the next action.
 
 ## 7. Release boundaries
 

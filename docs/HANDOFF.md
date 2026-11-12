@@ -41,7 +41,7 @@ Details: Project store `docs/predeployment-stabilization-notes.md`.
 - Multi-line text is stored with CRLF line endings (browser form normalization); not addressed.
 - Not browser-tested: the "Saving..." pending state and whitespace-only content (unit tests only).
 - Still open: `.env.example` is out of date; CI uses `pnpm install --no-frozen-lockfile`.
-- **Docs not yet updated for the new milestone numbering:** `docs/ARCHITECTURE.md` still refers to "Roadmap M3–M4" for auth and deployment (sections B1 and the open questions) and "Roadmap M5" for ChatGPT integration (B2). ARCHITECTURE items about URL fetching "(Roadmap M2)" and the "tsbuildinfo still open" row are stale, and `docs/PROJECT.md` section 6 still describes the form as awaiting browser acceptance. Update those when those documents are next revised.
+- Docs reconciled 2026-11-12: `ARCHITECTURE.md` and `PROJECT.md` now use the new milestone numbering and describe the merged capture implementation. `ARCHITECTURE.md` Part C still records open items (shallow health check, untested migrations, unused `projects`/`tasks` tables, `.env.example` drift).
 - Future risk to design for if URLs are ever fetched server-side: accepted URLs include localhost/private hosts, so fetching would need SSRF controls.
 
 ## Immediate next step

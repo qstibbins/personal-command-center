@@ -21,7 +21,7 @@ Priorities below reflect the agreed sequence, not the order in which ideas were 
 | 6 | Historical conversation ingestion and knowledge review | Milestone 3; builds on Milestone 5 knowledge/task structures |
 | 7 | Background processing, AI agent orchestration, and monitoring | Milestones 3 and 5 (real records to act on); Milestone 6 optional input |
 
-**Renumbering note (nothing was dropped).** Before this update, Milestone 3 (authentication and production readiness) and Milestone 4 (first private deployment) were separate; their full scope is now combined in the new Milestone 3. The former Milestone 5 (ChatGPT integration) is now Milestone 4. The new Milestone 5 (task, project, and knowledge capabilities) draws on the product domains in `docs/PROJECT.md` and, previously, appeared only inside Milestones 6 and 7. Milestones 6 and 7 keep their numbers and scope. `docs/ARCHITECTURE.md` still uses the old numbers in places (see `docs/HANDOFF.md`).
+**Renumbering note (nothing was dropped).** Before this update, Milestone 3 (authentication and production readiness) and Milestone 4 (first private deployment) were separate; their full scope is now combined in the new Milestone 3. The former Milestone 5 (ChatGPT integration) is now Milestone 4. The new Milestone 5 (task, project, and knowledge capabilities) draws on the product domains in `docs/PROJECT.md` and, previously, appeared only inside Milestones 6 and 7. Milestones 6 and 7 keep their numbers and scope. `docs/ARCHITECTURE.md` and `docs/PROJECT.md` were reconciled to the new numbering on 2026-11-12.
 
 ## Milestone 0 — Foundation and first vertical slice
 
