@@ -4,6 +4,8 @@
  * or prefixed with NEXT_PUBLIC_.
  */
 
+import "server-only";
+
 const API_URL = process.env.API_INTERNAL_URL ?? "http://localhost:8000";
 
 export function getApiBaseUrl(): string {

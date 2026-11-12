@@ -8,7 +8,7 @@
 This file separates **what the repository actually contains** from **what is only planned**.
 
 - **Part A (Verified implementation)** was derived by reading source, configuration, migrations, tests, CI, and Docker Compose in the repository. Unless noted, tests were **not** re-run for this document. See [Verification status](#verification-status) for what was and was not executed.
-- **Part B (Planned architecture)** is taken from `docs/PROJECT.md`, `docs/ROADMAP.md`, `docs/HANDOFF.md`, and the ADRs. **None of it is implemented.**
+- **Part B (Planned architecture)** is taken from `docs/PROJECT.md`, `docs/ROADMAP.md`, `docs/HANDOFF.md`, and the ADRs. Items move to Part A when verified in code; Part B may note partial delivery (for example Milestone 3.2).
 - **Part C** lists discrepancies between documentation and code, and unresolved questions.
 
 Product intent lives in `PROJECT.md`, sequencing in `ROADMAP.md`, and the next action in `HANDOFF.md`. This file describes technical reality.
@@ -224,14 +224,14 @@ Prerequisites per README: Docker, Node 22, pnpm 10.11.0, Python 3.12+, `uv`.
 
 ---
 
-# Part B — Planned architecture (NOT implemented)
+# Part B — Planned architecture
 
-Everything below comes from `PROJECT.md`, `ROADMAP.md`, `HANDOFF.md` and ADR 0002. There is no corresponding code. Treat it as intent that may change.
+Everything below comes from `PROJECT.md`, `ROADMAP.md`, `HANDOFF.md`, and the ADRs unless a subsection notes partial delivery already reflected in Part A. Treat unmarked items as intent that may change.
 
 ## B1. Authentication, API security, and minimal private deployment (Roadmap M3)
-Planned: single-user auth protecting both UI and API, secure secrets, HTTPS, persistent Postgres with backups, and health checks, in a minimal private deployment designed so remote access can be added later (Roadmap M3 combines the former M3 and M4). **Milestone 3.1 architecture planning is complete**; implementation follows `docs/decisions/0003-m3-auth-security-design.md`. A small VPS with Docker Compose remains a hosting candidate, not a final decision. **Today:** no auth, no production configuration, no Dockerfiles, and a health endpoint that checks nothing downstream.
+**Partial delivery:** Milestone 3.1 (ADR 0003) is accepted. **Milestone 3.2 is implemented** in Part A: FastAPI capture endpoints enforce Bearer authentication with scopes `captures:read` / `captures:write`, and the Next.js server calls FastAPI with the server-only `PCC_SERVICE_CREDENTIAL` (optional previous credential for rotation). Health remains unauthenticated.
 
-Architecture decision status (accepted design, not implemented): ADR 0003 selects Google sign-in with an explicit verified-email allowlist, Auth.js v5 with PostgreSQL database sessions (`@auth/*` Postgres-compatible adapter), protection of pages and Server Actions, FastAPI-enforced API authorization with initial scopes `captures:read` / `captures:write`, a server-side Next.js→FastAPI service credential with rotation/compromise procedure, scoped revocable API tokens (first token issued only via authenticated allowlisted control path), and a private HTTPS-first deployment baseline. ChatGPT iPhone feasibility remains a Milestone 4 gate, not a Milestone 3 completion requirement.
+**Still planned (not implemented):** Google sign-in / Auth.js v5 browser authentication (verified-email allowlist, PostgreSQL database sessions, protection of pages and Server Actions); external/personal API token issuance, storage (hashed), and revocation UI; production configuration, Dockerfiles, HTTPS private deployment, backups, and deep health checks. A small VPS with Docker Compose remains a hosting candidate, not a final decision. ChatGPT iPhone feasibility remains a Milestone 4 gate, not a Milestone 3 completion requirement. Full design: `docs/decisions/0003-m3-auth-security-design.md`.
 
 ## B2. ChatGPT ↔ PCC integration (Roadmap M4)
 Planned: let the standard ChatGPT app (including iPhone) save and retrieve PCC data through a supported, authenticated tool/MCP-style interface.
