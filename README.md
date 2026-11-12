@@ -45,7 +45,11 @@ Auth.js v5 (`next-auth` v5 beta) with `@auth/pg-adapter`, Google provider, and P
 | `PCC_ALLOWED_GOOGLE_EMAILS` | Next.js (server-only) | Allowlist; missing/empty fails closed |
 | `AUTH_DATABASE_URL` | Next.js (optional) | pg URL; otherwise `DATABASE_URL` is rewritten |
 
-Local Google redirect URI: `http://localhost:3000/api/auth/callback/google`. Personal API token issuance is still not implemented (see ADR 0003).
+Local Google redirect URI: `http://localhost:3000/api/auth/callback/google`.
+
+### Scoped API tokens (Milestone 3.4)
+
+Allowlisted operators manage tokens at `/settings/api-tokens` after Google sign-in. FastAPI stores only SHA-256 hashes. Bearer tokens use the `pcc_at_` prefix and may carry `captures:read` and/or `captures:write`. Management routes (`/api/v1/api-tokens`) accept the Next.js service credential only; personal API tokens cannot create or revoke other tokens. The raw token is returned once at creation. ChatGPT integration is still Milestone 4.
 
 ### Test a background job
 
@@ -72,9 +76,9 @@ At the root: `pnpm lint:web && pnpm test:web && pnpm build:web`.
 
 ## What is and isn't included
 
-Included: a Universal Capture web form (text or URL, with pending, success, and error feedback) and an Inbox listing saved captures; FastAPI endpoints `GET /api/v1/health`, `POST /api/v1/captures`, and `GET /api/v1/captures`; FastAPI service-credential authentication with scopes `captures:read` / `captures:write` on capture endpoints; Auth.js v5 Google sign-in with a verified-email allowlist and PostgreSQL database sessions protecting pages and Server Actions; SQLAlchemy models and Alembic migrations (`captures`, Auth.js session tables, plus unused `projects` and `tasks` tables); PostgreSQL; Redis and an RQ worker with a demo job only; backend and frontend tests; CI; and ADRs. See `docs/ARCHITECTURE.md` for details.
+Included: a Universal Capture web form (text or URL, with pending, success, and error feedback) and an Inbox listing saved captures; FastAPI endpoints `GET /api/v1/health`, `POST|GET /api/v1/captures`, and API-token create/list/revoke; FastAPI service-credential and hashed scoped API-token authentication (`captures:read` / `captures:write`); Auth.js v5 Google sign-in with a verified-email allowlist and PostgreSQL database sessions protecting pages and Server Actions; owner-only `/settings/api-tokens` UI; SQLAlchemy models and Alembic migrations (`captures`, Auth.js session tables, `api_tokens`, plus unused `projects` and `tasks` tables); PostgreSQL; Redis and an RQ worker with a demo job only; backend and frontend tests; CI; and ADRs. See `docs/ARCHITECTURE.md` for details.
 
-Not yet included: personal API token issuance UI, file uploads, object storage, task and project APIs, URL remote fetching, capture processing, AI integrations, ChatGPT integration, ChatGPT history import, agents, PWA offline support, production Dockerfiles, TLS, backups, and full production hardening. **Do not expose this scaffold to the internet or upload private journal entries yet.**
+Not yet included: file uploads, object storage, task and project APIs, URL remote fetching, capture processing, AI integrations, ChatGPT integration, ChatGPT history import, agents, PWA offline support, production Dockerfiles, TLS, backups, and full production hardening. **Do not expose this scaffold to the internet or upload private journal entries yet.**
 
 ## Architecture
 
@@ -96,4 +100,4 @@ The database is the system of record; the worker is for slow tasks; the AI provi
 
 ## Next milestone
 
-Continue Milestone 3 per ADR 0003: scoped API token issuance and private HTTPS deployment. See `docs/ROADMAP.md`.
+Continue Milestone 3 per ADR 0003: private HTTPS deployment (API tokens are implemented). See `docs/ROADMAP.md`.

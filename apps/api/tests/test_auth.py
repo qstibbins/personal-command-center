@@ -138,7 +138,7 @@ def test_authorized_list_and_create_succeed(raw_db_client, auth_headers):
 
 
 def test_insufficient_permissions_returns_403(raw_db_client, monkeypatch):
-    """Simulate a future limited-scope API token via the token verification hook."""
+    """Limited-scope principal is authenticated but blocked on missing scopes."""
 
     limited = AuthPrincipal(
         subject="api_token:test-limited",
@@ -147,7 +147,7 @@ def test_insufficient_permissions_returns_403(raw_db_client, monkeypatch):
     )
     limited_token = "limited-scope-test-token"
 
-    def fake_api_token(token: str, settings):
+    def fake_api_token(token: str, db):
         if token == limited_token:
             return limited
         return None
@@ -187,7 +187,7 @@ def test_write_only_principal_cannot_list(raw_db_client, monkeypatch):
 
     monkeypatch.setattr(
         "pcc.auth.credentials.verify_api_token",
-        lambda t, s: write_only if t == token else None,
+        lambda t, db: write_only if t == token else None,
     )
 
     denied = raw_db_client.get(
@@ -216,17 +216,23 @@ def test_authorized_request_still_validates_capture_body(raw_db_client, auth_hea
     _assert_no_credential_leak(response, TEST_SERVICE_CREDENTIAL)
 
 
-def test_verify_bearer_token_prefers_service_credential():
-    settings = get_settings()
-    principal = verify_bearer_token(TEST_SERVICE_CREDENTIAL, settings)
-    assert principal is not None
-    assert principal.auth_method == "service_credential"
-    assert SCOPE_CAPTURES_READ in principal.scopes
-    assert SCOPE_CAPTURES_WRITE in principal.scopes
+def test_verify_bearer_token_prefers_service_credential(raw_db_client):
+    import os
 
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
 
-def test_verify_api_token_placeholder_returns_none():
-    assert verify_api_token("anything", get_settings()) is None
+    engine = create_engine(os.environ["TEST_DATABASE_URL"])
+    Session = sessionmaker(bind=engine, autoflush=False)
+    with Session() as session:
+        settings = get_settings()
+        principal = verify_bearer_token(TEST_SERVICE_CREDENTIAL, settings, session)
+        assert principal is not None
+        assert principal.auth_method == "service_credential"
+        assert SCOPE_CAPTURES_READ in principal.scopes
+        assert SCOPE_CAPTURES_WRITE in principal.scopes
+        assert verify_api_token("not-a-real-token", session) is None
+    engine.dispose()
 
 
 def test_get_principal_override_cleared_after_insufficient_scope_test(raw_db_client):

@@ -88,12 +88,13 @@ These are illustrative domains, not a commitment to implement every integration 
 
 ## 6. What exists today
 
-As of 2026-11-12 (Universal Capture v1 on `main`; Milestone 3.2 API auth on `main`; Milestone 3.3 Google/Auth.js on the M3.3 feature branch):
+As of 2026-11-12 (Universal Capture v1 and Milestones 3.2–3.3 on `main`; Milestone 3.4 scoped API tokens on the M3.4 feature branch):
 - Next.js / React web application and FastAPI backend with PostgreSQL persistence.
 - Text and URL capture through the website, with an Inbox listing captures. The form shows pending, success, and error states, field-level validation errors, and resets only on success. FastAPI validates and trims input; URL captures accept only absolute `http`/`https` URLs, and remote content is not fetched.
-- FastAPI capture endpoints require a server-only service credential with scopes `captures:read` / `captures:write`. Health stays public.
-- Website Google sign-in (Auth.js v5, PostgreSQL database sessions, verified-email allowlist) protects pages and Server Actions when M3.3 is present; real Google OAuth browser acceptance may still be pending after merge.
-- Automated tests cover capture flows, API auth, and Auth.js allowlist/session gates (see `docs/HANDOFF.md` for current counts). There are no component-level frontend tests.
+- FastAPI capture endpoints accept a server-only service credential or hashed scoped API tokens (`captures:read` / `captures:write`). Health stays public.
+- Website Google sign-in (Auth.js v5, PostgreSQL database sessions, verified-email allowlist) protects pages and Server Actions; real Google OAuth browser acceptance may still be pending.
+- Owner-only API token management at `/settings/api-tokens` (raw token shown once at creation).
+- Automated tests cover capture flows, API auth, Auth.js allowlist/session gates, and API token lifecycle (see `docs/HANDOFF.md` for current counts). There are no component-level frontend tests.
 - The capture form passed browser acceptance in real Chrome on 2026-11-12 (pre-auth).
 - Redis/RQ infrastructure exists, but AI processing and agent orchestration are not yet implemented.
 - PCC is still not production-hardened (no private HTTPS deployment yet).

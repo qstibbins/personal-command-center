@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, String, Text, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from pcc.db.base import Base
@@ -79,4 +79,47 @@ class Capture(Base):
         onupdate=lambda: datetime.now(UTC),
         server_default=func.now(),
     )
+
+
+class ApiToken(Base):
+    """Hashed, scoped, revocable bearer API tokens for non-browser clients."""
+
+    __tablename__ = "api_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+
+    label: Mapped[str] = mapped_column(String(100), nullable=False)
+
+    # Non-secret display prefix (e.g. "pcc_at_AbCd"); never enough to authenticate.
+    token_prefix: Mapped[str] = mapped_column(String(32), nullable=False)
+
+    # SHA-256 hex digest of the raw bearer token. Unique.
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+
+    # JSON array of scope strings, e.g. ["captures:read"].
+    scopes: Mapped[list] = mapped_column(JSONB, nullable=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        server_default=func.now(),
+    )
+
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+
+    # Allowlisted operator email recorded at issuance (audit).
+    created_by_email: Mapped[str] = mapped_column(String(320), nullable=False)
 

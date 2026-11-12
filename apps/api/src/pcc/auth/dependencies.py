@@ -4,7 +4,9 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.orm import Session
 
+from pcc.api.deps import get_db
 from pcc.auth.credentials import verify_bearer_token
 from pcc.auth.principals import AuthPrincipal
 from pcc.core.config import Settings, get_settings
@@ -19,6 +21,7 @@ def get_principal(
         HTTPAuthorizationCredentials | None, Depends(_bearer_scheme)
     ],
     settings: Annotated[Settings, Depends(get_settings)],
+    db: Annotated[Session, Depends(get_db)],
 ) -> AuthPrincipal:
     """Authenticate the caller. Does not check scopes."""
     if credentials is None or credentials.scheme.lower() != "bearer" or not credentials.credentials:
@@ -28,7 +31,7 @@ def get_principal(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    principal = verify_bearer_token(credentials.credentials, settings)
+    principal = verify_bearer_token(credentials.credentials, settings, db)
     if principal is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -57,3 +60,23 @@ def require_scopes(*required_scopes: str):
         return principal
 
     return dependency
+
+
+def require_service_principal(
+    principal: Annotated[AuthPrincipal, Depends(get_principal)],
+) -> AuthPrincipal:
+    """Restrict token-management routes to the Next.js service credential.
+
+    Personal API tokens cannot create, list, or revoke other tokens. Owner
+    allowlist enforcement for issuance lives in the Next.js control path
+    (Auth.js session) before these endpoints are called.
+    """
+    if principal.auth_method not in {
+        "service_credential",
+        "service_credential_previous",
+    }:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions",
+        )
+    return principal
