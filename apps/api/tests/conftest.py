@@ -10,7 +10,6 @@ from sqlalchemy.orm import sessionmaker
 from pcc.api.captures import get_db
 from pcc.db.base import Base
 from pcc.main import app
-import pcc.db.models  # Register models with Base
 
 
 @pytest.fixture

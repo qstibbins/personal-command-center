@@ -1,5 +1,7 @@
 from fastapi.testclient import TestClient
+
 from pcc.main import app
+
 
 def test_health():
     response = TestClient(app).get("/api/v1/health")

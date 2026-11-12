@@ -57,10 +57,10 @@ Browser ──HTML/RSC/Server Action──▶ Next.js (apps/web, :3000)
 
 **Create capture**
 1. User submits the form in `capture-form.tsx` (client component, `useActionState`).
-2. `createCapture(prevState, formData)` runs on the Next.js server. It reads `source_type`, `title`, `content` and trims title and content.
+2. `createCapture(prevState, formData)` runs on the Next.js server. It reads `source_type`, `title`, `content` and trims title and content (the API trims again; see Validation limits).
 3. Empty content returns an error state without calling the API. Otherwise it `POST`s `{source_type, title|null, content}` to `${API_INTERNAL_URL ?? "http://localhost:8000"}/api/v1/captures`.
-4. FastAPI validates the body with `CaptureCreate`, then `create_capture` inserts a `Capture` row (status `pending`) and returns 201 with `CaptureRead`.
-5. Non-OK HTTP responses and thrown network errors return an error state with the user's raw input echoed back. Success returns empty values and calls `revalidatePath("/")`.
+4. FastAPI is the authority on validation: `CaptureCreate` trims and validates the body (422 on failure), then `create_capture` inserts a `Capture` row (status `pending`) and returns 201 with `CaptureRead`.
+5. A 422 is mapped to field-level errors (`title` / `content`) shown under the matching form field; other non-OK responses, malformed bodies, and thrown network errors return a generic error state. In every error case the user's raw input (including the selected type) is echoed back. Success returns empty values and calls `revalidatePath("/")`.
 
 **Load Inbox**
 1. `page.tsx` is a server component. It calls `GET /api/v1/health` and `GET /api/v1/captures` in parallel with `cache: "no-store"`. The captures call sends no `limit`, so the API default of 50 applies.
@@ -73,14 +73,19 @@ The browser never talks to FastAPI directly. All API calls originate from the Ne
 | Method & path | Behavior |
 |---|---|
 | `GET /api/v1/health` | Returns `{"status": "ok", "service": "pcc-api"}`. Does **not** check database or Redis. |
-| `POST /api/v1/captures` | Body: `source_type` (`"text"` or `"url"`), `title` (optional, max 300), `content` (min length 1, must not be whitespace-only). Returns 201 and the capture. Invalid input returns 422. |
+| `POST /api/v1/captures` | Body: `source_type` (`"text"` or `"url"`), `title` (optional, max 300), `content` (trimmed; must not be blank). For `url` captures `content` must be an absolute `http`/`https` URL, at most 2,048 characters. For `text` captures it is at most 100,000 characters. Returns 201 and the capture. Invalid input returns 422 with errors on `body.title` / `body.content`. |
 | `GET /api/v1/captures` | Query `limit` (1–100, default 50). Returns captures ordered by `created_at` desc, then `id` desc. |
 
 FastAPI also serves its automatic OpenAPI docs (`/docs`, `/openapi.json`) because no override exists.
 
 **Not implemented:** get-by-id, update, delete, search, pagination beyond `limit`, task or project endpoints, any auth.
 
-**Validation limits:** `url` captures are treated as plain text. There is no scheme check, normalization, or fetching of remote content. The API does not trim content or title. The trimming happens in the Next.js Server Action.
+**Validation rules (`schemas/capture.py`, enforced by FastAPI):**
+- `title` and `content` have leading/trailing whitespace trimmed; internal whitespace and line breaks are preserved. A blank title becomes `null`; blank content is rejected. Title max is 300 characters.
+- `url` captures must be absolute `http` or `https` URLs with a valid hostname (domain, IP literal, or `localhost`), no whitespace or control characters, no embedded username or password, and at most 2,048 characters. The trimmed original string is stored; it is not normalized (no case, trailing-slash, or encoding changes).
+- `text` captures are never URL-checked and are limited to 100,000 characters.
+- There is no fetching of remote content.
+- The Next.js Server Action also trims, but it does not duplicate these rules.
 
 ## A4. Data model (verified from `db/models.py` and migrations)
 
@@ -180,9 +185,9 @@ Prerequisites per README: Docker, Node 22, pnpm 10.11.0, Python 3.12+, `uv`.
 | Backend tests | `TEST_DATABASE_URL=<url to pcc_test> uv run pytest` | `apps/api` |
 | Backend lint | `uv run ruff check src tests` | `apps/api` |
 
-**Backend test design:** three validation tests use no database (they fail before any DB access). Two tests (`test_create_capture`, `test_list_captures`) use the `db_client` fixture. It refuses to run unless `TEST_DATABASE_URL` is set and the database name is exactly `pcc_test`. It then runs `Base.metadata.create_all` and `drop_all` around each test and overrides `get_db`. The tests therefore build schema from the models and **do not exercise the Alembic migrations**. Nothing in the repo creates the `pcc_test` database.
+**Backend test design:** validation-failure tests (blank, bad enum, invalid or oversized URLs, over-length text or title) use no database because they fail before any DB access. Tests that save a capture (`test_create_capture`, `test_list_captures`, and the accepted-input cases in `test_capture_validation.py`) use the `db_client` fixture. It refuses to run unless `TEST_DATABASE_URL` is set and the database name is exactly `pcc_test`. It then runs `Base.metadata.create_all` and `drop_all` around each test and overrides `get_db`. The tests therefore build schema from the models and **do not exercise the Alembic migrations**. CI provisions `pcc_test` through a Postgres service container; locally it must be created manually.
 
-**Frontend test design:** only the Server Action is tested (success, HTTP failure, network failure, blank content). `fetch` and `next/cache` are mocked in Vitest's default Node environment. There are no component tests, browser tests, or Vitest config file.
+**Frontend test design:** only the Server Action is tested (success and reset, 422 field-error mapping, generic fallbacks for malformed bodies, 5xx and network failures, blank content, and the `source_type` returned to the form). `fetch` and `next/cache` are mocked in Vitest's default Node environment. There are no component tests, browser tests, or Vitest config file.
 
 **CI (`.github/workflows/ci.yml`)** runs on every push and PR:
 - Backend job: `uv sync`, `uv run pytest`, `uv run ruff check`.
@@ -236,7 +241,6 @@ Planned: Redis/RQ processing of captures, an AI-provider abstraction with budget
 - **Not implemented:** capture-processing jobs, enqueueing from the API, provider abstraction, agents, threads, runs, approvals, dashboards, or any LLM call. `PROJECT.md` itself says these are requirements, not existing models.
 
 ## B5. Other planned items
-- URL validation/normalization and frontend/backend validation parity (Roadmap M2).
 - Knowledge search/retrieval, projects, tasks UI/API, briefings.
 - File upload and a storage abstraction (ADR 0002, Proposed).
 - A generated TypeScript API client (`packages/api-client`).
@@ -270,7 +274,7 @@ Planned: Redis/RQ processing of captures, an AI-provider abstraction with budget
 5. **Migrations are untested.** Tests use `create_all`, so a migration/model mismatch would not be caught.
 6. **Health check is shallow.** It reports `ok` without verifying PostgreSQL or Redis.
 7. **Capture status never leaves `pending`**, and capture creation does not enqueue any job. The Inbox's "status" is therefore always `pending`.
-8. **Whitespace handling is split.** The API rejects whitespace-only content but stores content untrimmed. Trimming happens only in the Next.js action, so direct API clients can store padded content.
+8. **Whitespace handling (resolved).** The API now trims title and content, so direct API clients cannot store padded values; the Server Action trims as well.
 9. **Frontend-only note:** the form is not usable without JavaScript, because it depends on `useActionState` in a client component.
 
 ## C3. Unresolved questions
