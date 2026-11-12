@@ -1,6 +1,6 @@
 # ADR 0003 — Milestone 3.1 authentication and API security design
 
-**Status:** Accepted for Milestone 3.1 planning (implementation pending)
+**Status:** Accepted. Milestone 3.2 (API service credential) and Milestone 3.3 (Google/Auth.js website sessions) are implemented in code; API token issuance and private deployment remain later Milestone 3 work.
 **Date:** 2026-11-12
 
 ## Context
