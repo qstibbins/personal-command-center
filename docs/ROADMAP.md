@@ -1,6 +1,6 @@
 # Personal Command Center (PCC) — Development Roadmap
 
-**Last updated:** 2026-11-12 (Milestone 3.5a Render deployment ADR accepted; priorities unchanged)  
+**Last updated:** 2026-11-12 (Milestone 3.5b Render deployment prep implemented; priorities unchanged)  
 **Status convention:** `Verified` = supported by reported tests/observed behavior; `Implemented, awaiting acceptance` = code reportedly changed but not browser-verified; `Planned` = not yet delivered. Confirm against Git and the running app before closing a milestone.
 
 ## Delivery strategy
@@ -88,7 +88,7 @@ Delivered:
 
 ## Milestone 3 — Authentication, API security, and minimal private deployment
 
-**Status: In progress. Milestone 3.1 (auth ADR) complete; Milestone 3.2 (FastAPI service-credential auth + scopes) complete; Milestone 3.3 (Auth.js v5 Google sign-in, PostgreSQL database sessions, page/Server Action protection) complete in code — real Google OAuth browser acceptance still required; Milestone 3.4 (scoped/revocable API tokens) complete in code; Milestone 3.5a (Render deployment ADR) complete. Remaining for Milestone 3: M3.5b repo deploy prep, then owner provisioning and private HTTPS v0.1 cutover.** This milestone combines the former Milestone 3 (authentication and production readiness) and Milestone 4 (first private deployment, v0.1).
+**Status: In progress. Milestone 3.1 (auth ADR) complete; Milestone 3.2 (FastAPI service-credential auth + scopes) complete; Milestone 3.3 (Auth.js v5 Google sign-in, PostgreSQL database sessions, page/Server Action protection) complete in code — real Google OAuth browser acceptance still required; Milestone 3.4 (scoped/revocable API tokens) complete in code; Milestone 3.5a (Render deployment ADR) complete; Milestone 3.5b (Dockerfiles, `render.yaml`, prod hardening, deploy runbooks) complete in repo — owner has not provisioned Render yet. Remaining for Milestone 3: owner provisioning and private HTTPS v0.1 cutover.** This milestone combines the former Milestone 3 (authentication and production readiness) and Milestone 4 (first private deployment, v0.1).
 
 **Design constraint: designed for future remote access.** The first deployment may be minimal and private, but it must not assume that the only client is a browser on the same machine. Choices made here should keep a later internet-reachable, HTTPS-protected endpoint possible without redesign. ChatGPT iPhone feasibility remains a **Milestone 4 gate**, not a Milestone 3 completion requirement. In particular: no hard-coded `localhost` assumptions, configurable public/internal base URLs and allowed origins, and API authentication that a non-browser client can use.
 
@@ -96,26 +96,26 @@ Delivered:
 - [x] Choose a simple authentication approach appropriate for a single-user private deployment (website sign-in plus API credentials), and record it as a decision under `docs/decisions/` (`0003-m3-auth-security-design.md`): Google sign-in, Auth.js v5 with PostgreSQL database sessions, FastAPI-enforced authorization, server-side Next.js→FastAPI service credential, and scoped revocable API tokens (`captures:read`, `captures:write`) for future integrations.
 - [x] Decide how the Next.js server authenticates to FastAPI and how non-browser clients authenticate: server-side service credential for Next.js→FastAPI plus scoped/revocable bearer API tokens for future integrations (see `docs/decisions/0003-m3-auth-security-design.md`).
 - [x] **Milestone 3.5a:** Choose the hosting target and network exposure model — **Render**: public HTTPS Next.js web service, **private** FastAPI service, managed PostgreSQL with private connectivity; Redis/worker deferred; ChatGPT reachability unverified (see `docs/decisions/0004-m3-render-deployment.md`).
-- [x] Inventory what production needs that does not exist yet (recorded in ADR 0004 / M3.5b plan): Dockerfiles, Render Blueprint/`render.yaml`, secrets handling, deep health checks, request size limits and rate limiting, `/docs` exposure policy, migration procedure, backups. _Repo artifacts still to implement in M3.5b._
+- [x] Inventory what production needs that does not exist yet (recorded in ADR 0004 / M3.5b): Dockerfiles, Render Blueprint/`render.yaml`, secrets handling, deep health checks, `/docs` exposure policy, migration procedure, backups. _Request size limits / rate limiting remain optional follow-ups._
 
 ### Authentication and API security
 - [x] **Milestone 3.2:** Protect capture API endpoints with FastAPI auth (`captures:read` / `captures:write`); Next.js server sends `PCC_SERVICE_CREDENTIAL` as a Bearer token (never to the browser). Health remains public. Auth module is centralized for future API tokens.
 - [x] **Milestone 3.3:** Protect website access (Auth.js v5 + Google verified-email allowlist + PostgreSQL database sessions) and Server Actions with server-side session checks (ADR 0003). Sign-out deletes the Auth.js `sessions` row. Local setup: `docs/google-signin-local.md`. _Browser OAuth acceptance with a real Google client still pending._
 - [x] Document service-credential and Auth.js / Google OAuth environment variables for local development (`.env.example`, README, `docs/google-signin-local.md`); keep secrets server-only.
-- [ ] Configure remaining production secrets and Auth.js / Google OAuth variables for the Render deployment (env map in ADR 0004; owner sets live values).
+- [x] Document production env checklist and Auth.js host/cookie expectations (`docs/deploy/production-env-checklist.md`). _Owner still sets live Render/Google values._
 - [x] **Milestone 3.4:** Personal / integration API token issuance (hashed SHA-256 storage, scopes `captures:read` / `captures:write`, revocable/expiring, owner-only create/list/revoke via allowlisted Auth.js session + FastAPI service-credential management routes). Raw token shown once. ChatGPT wiring remains Milestone 4.
 
 ### Minimal private deployment (v0.1)
 - [x] **Select hosting** (Render) and document HTTPS, private FastAPI, managed Postgres, backups, migrations, health, and rollback (ADR 0004).
-- [ ] **Milestone 3.5b:** Implement repo deploy prep (Dockerfiles, Render Blueprint, deep health / `/docs` hardening, migrate/backup runbook) per ADR 0004 acceptance criteria — documentation-only work in 3.5a does **not** create Render resources.
-- [ ] Owner: configure HTTPS domain/access, paid Postgres, production secrets, Google OAuth production callback URLs, and platform backups.
-- [ ] Verify production builds, the database migration procedure, and health checks; run migrations and start services with production configuration.
+- [x] **Milestone 3.5b:** Repo deploy prep — Dockerfiles (`apps/web`, `apps/api`), `render.yaml` (public web + private API + Postgres; no Redis), `/docs` lockdown + `/api/v1/ready`, web `/api/health`, migrate-on-API-preDeploy ownership, `docs/deploy/*` runbooks. **No Render resources provisioned.**
+- [ ] Owner: configure HTTPS domain/access, paid Postgres, production secrets, Google OAuth production callback URLs, and platform backups (apply Blueprint intentionally).
+- [ ] Verify production builds on Render, the database migration procedure, and health checks; run migrations and start services with production configuration.
 - [ ] Verify sign-in, capture, Inbox retrieval, refresh, service restart, and data persistence.
-- [ ] Verify backup/recovery and document repeatable deploy, rollback, recovery, and access steps.
+- [ ] Verify backup/recovery (including PITR recovery-instance billing awareness) and follow `docs/deploy/render-runbook.md`.
 
 **Exit criterion:** PCC is deployed at a secure private URL without exposing personal captures or unauthenticated write endpoints, the capture workflow survives a restart, and nothing in the design blocks later remote access.
 
-**Open Milestone 3 implementation dependencies (not ChatGPT iPhone feasibility):** M3.5b repository artifacts; owner Render provisioning and secret/OAuth cutover; operational secret-rotation cadence. Hosting/ingress model resolved in ADR 0004 (public HTTPS website + private FastAPI). Auth.js tables are owned by Alembic revision `0003_authjs_tables` (resolved in Milestone 3.3). ChatGPT iPhone support, auth method, and reachability remain **Milestone 4 feasibility-gate** items and are not required to close Milestone 3. Private FastAPI in v0.1 may require a later controlled public authenticated surface if Milestone 4 needs internet-reachable tool calls — do not expose FastAPI publicly preemptively.
+**Open Milestone 3 implementation dependencies (not ChatGPT iPhone feasibility):** owner Render provisioning and secret/OAuth cutover; operational secret-rotation cadence; optional rate limits. Hosting/ingress model resolved in ADR 0004; M3.5b repo artifacts on the feature branch / merged when accepted. Auth.js tables are owned by Alembic revision `0003_authjs_tables` (resolved in Milestone 3.3). ChatGPT iPhone support, auth method, and reachability remain **Milestone 4 feasibility-gate** items and are not required to close Milestone 3. Private FastAPI in v0.1 may require a later controlled public authenticated surface if Milestone 4 needs internet-reachable tool calls — do not expose FastAPI publicly preemptively.
 
 ## Milestone 4 — ChatGPT ↔ PCC integration
 

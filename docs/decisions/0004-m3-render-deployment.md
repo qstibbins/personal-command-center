@@ -1,6 +1,6 @@
 # ADR 0004 — Milestone 3.5a Render deployment architecture
 
-**Status:** Accepted (design only; no Render resources provisioned by this ADR)  
+**Status:** Accepted. Milestone 3.5b implements repo prep (Dockerfiles, `render.yaml`, hardening, runbooks). No Render resources are provisioned by the ADR or by M3.5b alone.  
 **Date:** 2026-11-12  
 **Supersedes open hosting item in:** ADR 0003 § “Unresolved dependencies” item 1 (private ingress model)
 

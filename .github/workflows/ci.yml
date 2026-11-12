@@ -37,6 +37,7 @@ jobs:
     env:
       # Placeholders so next build can compile Auth.js config without real secrets.
       AUTH_SECRET: ci-only-not-a-real-secret
+      AUTH_URL: https://ci.example.invalid
       AUTH_GOOGLE_ID: ci-placeholder-client-id
       AUTH_GOOGLE_SECRET: ci-placeholder-client-secret
       PCC_ALLOWED_GOOGLE_EMAILS: ci@example.com
@@ -54,3 +55,5 @@ jobs:
       - run: pnpm lint:web
       - run: pnpm test:web
       - run: pnpm build:web
+      - name: Validate Render Blueprint structure
+        run: python3 scripts/validate_render_blueprint.py

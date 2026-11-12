@@ -1,7 +1,7 @@
 # Personal Command Center (PCC) — Architecture
 
-**Last updated:** 2026-11-12 (Milestone 3.5a Render deployment ADR)
-**Branch inspected:** `main` through Milestone 3.4 (`d608cee`); deployment design on docs branch
+**Last updated:** 2026-11-12 (Milestone 3.5b Render deployment prep)
+**Branch inspected:** `feat/m3-render-deployment-prep` (on `main` through Milestone 3.5a / PR #7)
 
 ## How to read this document
 
@@ -28,7 +28,7 @@ PCC is currently a **single-user capture-and-Inbox application**. A user signs i
 - No code processes captures: they are stored as `pending` and never change status.
 - A Redis/RQ worker exists as infrastructure with a demo job only.
 
-The README states this is "a development foundation, not a production-ready app" and warns against exposing it to the internet. That warning remains accurate until the Render private HTTPS deployment (ADR 0004) is provisioned; design is accepted, resources are not yet created.
+The README states this is "a development foundation, not a production-ready app" and warns against exposing it to the internet. That warning remains accurate until the Render private HTTPS deployment (ADR 0004) is **provisioned by the owner**. Repo prep (Dockerfiles, `render.yaml`, readiness, docs lockdown) exists in Milestone 3.5b; live resources are not created by agents.
 
 ## A2. Components and responsibilities
 
@@ -55,8 +55,9 @@ Browser ──HTML/RSC/Server Action──▶ Next.js (apps/web, :3000)
 | Schemas | `apps/api/src/pcc/schemas/capture.py`, `schemas/api_token.py` | Pydantic request/response models and validation. |
 | Persistence | `apps/api/src/pcc/db/` | SQLAlchemy 2.0 declarative models, engine, `SessionLocal`. |
 | Migrations | `apps/api/migrations/` | Alembic revisions (Auth.js tables + `api_tokens`). |
-| Worker | `apps/api/src/pcc/worker/` | RQ `Worker` on queue `default`; one `sample_job`; `submit_demo` enqueues it. |
-| Infrastructure | `compose.yaml` | PostgreSQL and Redis only, loopback-bound. |
+| Worker | `apps/api/src/pcc/worker/` | RQ `Worker` on queue `default`; one `sample_job`; `submit_demo` enqueues it. **Not deployed on Render v0.1.** |
+| Infrastructure (local) | `compose.yaml` | PostgreSQL and Redis only, loopback-bound. |
+| Infrastructure (prod prep) | `apps/*/Dockerfile`, `render.yaml` | Render Blueprint: public web + private API + managed Postgres; no Redis/worker. |
 
 ### Request flows (verified from code)
 
@@ -85,13 +86,14 @@ The browser never talks to FastAPI directly. All API calls originate from the Ne
 | Method & path | Behavior |
 |---|---|
 | `GET /api/v1/health` | Unauthenticated. Returns `{"status": "ok", "service": "pcc-api"}`. Does **not** check database or Redis. |
+| `GET /api/v1/ready` | Unauthenticated readiness. Runs `SELECT 1` against Postgres; `200` when reachable, `503` when not. No exception details in the body. |
 | `POST /api/v1/captures` | Requires Bearer auth with scope `captures:write`. Body: `source_type` (`"text"` or `"url"`), `title` (optional, max 300), `content` (trimmed; must not be blank). For `url` captures `content` must be an absolute `http`/`https` URL, at most 2,048 characters. For `text` captures it is at most 100,000 characters. Returns 201 and the capture. Missing/invalid credentials → 401; insufficient scope → 403; invalid input → 422 with errors on `body.title` / `body.content`. |
 | `GET /api/v1/captures` | Requires Bearer auth with scope `captures:read`. Query `limit` (1–100, default 50). Returns captures ordered by `created_at` desc, then `id` desc. |
 | `POST /api/v1/api-tokens` | Service credential only (`require_service_principal`). Creates a scoped token; returns metadata plus the raw token **once**. Persists only the SHA-256 hash. |
 | `GET /api/v1/api-tokens` | Service credential only. Lists token metadata (no raw token, no hash). |
 | `POST /api/v1/api-tokens/{id}/revoke` | Service credential only. Sets `revoked_at`; idempotent if already revoked. |
 
-FastAPI also serves its automatic OpenAPI docs (`/docs`, `/openapi.json`) because no override exists. Calling protected endpoints from `/docs` requires a Bearer token.
+OpenAPI docs (`/docs`, `/redoc`, `/openapi.json`) are served only when `PCC_ENV` is not `production`. In production they return 404. Calling protected endpoints from `/docs` in non-production still requires a Bearer token.
 
 **Auth (Milestones 3.2–3.4):** FastAPI `pcc.auth` verifies `Authorization: Bearer` against `PCC_SERVICE_CREDENTIAL` (and optional previous) **or** a row in `api_tokens` matched by SHA-256 hash. Revoked and expired API tokens yield 401. Scopes are enforced independently via `require_scopes(...)`. Token management routes reject API-token principals (403) and must be reached through the allowlisted Next.js session control path. Website Auth.js v5 Google sign-in with PostgreSQL database sessions protects pages and Server Actions.
 
@@ -205,9 +207,12 @@ State types live in `capture-state.ts` / `api-tokens-state.ts` because a `"use s
 | `PCC_SERVICE_CREDENTIAL` | Yes (FastAPI `core/config.py`; Next.js `app/api.ts`) | Server-only shared secret for capture and token-management endpoints. |
 | `PCC_SERVICE_CREDENTIAL_PREVIOUS` | Yes (FastAPI) | Optional dual-read during rotation. |
 | `API_INTERNAL_URL` | Yes (`app/api.ts`) | Defaults to `http://localhost:8000`. |
+| `API_INTERNAL_HOSTPORT` | Yes (`app/api.ts`) | Render private-service `host:port`; used when `API_INTERNAL_URL` unset. |
 | `AUTH_SECRET` | Yes (Auth.js) | Session signing/encryption secret. |
+| `AUTH_URL` | Yes (Auth.js / `auth-cookies.ts`) | Required `https://…` in production. |
 | `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | Yes (Auth.js Google provider) | OAuth Web client credentials. |
 | `PCC_ALLOWED_GOOGLE_EMAILS` | Yes (`auth-allowlist.ts`) | Comma-separated; missing/empty fails closed. |
+| `PCC_ENV` | Yes (`core/config.py`) | `production` disables API OpenAPI docs. |
 | `TEST_DATABASE_URL` | Yes (`tests/conftest.py`) | Must point at a database named `pcc_test`. |
 | `API_CORS_ORIGINS` | **No** | Commented in `.env.example`; no CORS middleware exists. |
 | `NEXT_PUBLIC_API_BASE_URL` | **No** | Commented in `.env.example`; not referenced by web code. |
@@ -254,7 +259,7 @@ Prerequisites per README: Docker, Node 22, pnpm 10.11.0, Python 3.12+, `uv`.
 | `packages/api-client` reserved for OpenAPI-generated client | **Placeholder only** (a README). The web app hand-writes its types. |
 | Tests protect real data via `pcc_test` guard | Implemented in `conftest.py`. |
 | **ADR 0003** Google/Auth.js database sessions + FastAPI service credential + scoped API tokens | Milestones 3.2–3.4 implemented in code; private deploy remains. |
-| **ADR 0004** Render hosting: public Next.js, private FastAPI, managed Postgres | Design accepted (docs only). No Dockerfiles/`render.yaml`/live services yet. Redis/worker deferred. |
+| **ADR 0004** Render hosting: public Next.js, private FastAPI, managed Postgres | Design accepted. M3.5b adds Dockerfiles + `render.yaml` + hardening. Live Render resources: owner only. Redis/worker deferred. |
 
 ## A10. Verification status
 
@@ -276,9 +281,9 @@ Everything below comes from `PROJECT.md`, `ROADMAP.md`, `HANDOFF.md`, and the AD
 ## B1. Authentication, API security, and minimal private deployment (Roadmap M3)
 **Partial delivery:** Milestone 3.1 (ADR 0003) is accepted. **Milestones 3.2–3.4** are implemented in Part A: FastAPI service credential + scopes; Auth.js Google sign-in with PostgreSQL database sessions; hashed scoped revocable API tokens with owner-only management UI. Health remains unauthenticated at the API. Real Google OAuth browser acceptance for 3.3 may still be pending after merge.
 
-**Hosting (Milestone 3.5a):** ADR 0004 selects **Render**. Target topology: public HTTPS Next.js web service → private FastAPI service on Render’s private network → managed Render Postgres (prefer internal URL + private-only ACL). Redis/RQ deferred for v0.1. Exposure model: public website + strict app auth; **do not** expose FastAPI publicly in v0.1.
+**Hosting (Milestones 3.5a–3.5b):** ADR 0004 selects **Render**. Repo prep includes Dockerfiles, `render.yaml` (public web + private API + Postgres; no Redis), `/api/v1/ready`, production docs lockdown, Auth.js `AUTH_URL`/secure cookies, and `docs/deploy/*` runbooks. Exposure model: public website + strict app auth; **do not** expose FastAPI publicly in v0.1.
 
-**Still planned (not implemented):** Dockerfiles, `render.yaml`/Blueprint, production secrets on Render, deep health/readiness, `/docs` lockdown, migrate-on-deploy hook, backup restore drill, and the live cutover (Milestone 3.5b + owner actions). ChatGPT iPhone feasibility remains a Milestone 4 gate. Full auth design: `docs/decisions/0003-m3-auth-security-design.md`. Full deploy design: `docs/decisions/0004-m3-render-deployment.md`.
+**Still planned (not implemented in repo / blocked on owner):** applying the Blueprint, production secrets on Render, live TLS domain, Google production OAuth URIs, backup restore drill, and cutover acceptance. ChatGPT iPhone feasibility remains a Milestone 4 gate. Full auth design: `docs/decisions/0003-m3-auth-security-design.md`. Full deploy design: `docs/decisions/0004-m3-render-deployment.md`.
 
 ## B2. ChatGPT ↔ PCC integration (Roadmap M4)
 Planned: let the standard ChatGPT app (including iPhone) save and retrieve PCC data through a supported, authenticated tool/MCP-style interface.
@@ -329,7 +334,7 @@ Planned: Redis/RQ processing of captures, an AI-provider abstraction with budget
 3. **`make test` fails without `TEST_DATABASE_URL`** for the same reason as (1).
 4. **Local `pcc_test` is still not created by repo tooling.** Compose creates only `pcc`, so developers must create `pcc_test` manually (CI creates it through its service container).
 5. **Migrations are untested.** Tests use `create_all`, so a migration/model mismatch would not be caught.
-6. **Health check is shallow.** It reports `ok` without verifying PostgreSQL or Redis.
+6. **Health vs readiness.** `/api/v1/health` remains shallow (process up). `/api/v1/ready` checks Postgres. Redis is not required for v0.1 Render deploy.
 7. **Capture status never leaves `pending`**, and capture creation does not enqueue any job. The Inbox's "status" is therefore always `pending`.
 8. **Whitespace handling (resolved).** The API now trims title and content, so direct API clients cannot store padded values; the Server Action trims as well.
 9. **Frontend-only note:** the form is not usable without JavaScript, because it depends on `useActionState` in a client component.
