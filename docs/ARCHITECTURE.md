@@ -141,7 +141,7 @@ apps/web/
     capture-form.tsx      # "use client" form (useActionState)
     capture-state.ts      # CaptureFormState type + initialCaptureState
     actions.ts            # "use server" createCapture
-    actions.test.ts       # 4 Vitest tests of createCapture
+    actions.test.ts       # 27 Vitest tests of createCapture
     styles.css            # global CSS (no CSS framework)
 ```
 
@@ -185,14 +185,14 @@ Prerequisites per README: Docker, Node 22, pnpm 10.11.0, Python 3.12+, `uv`.
 | Backend tests | `TEST_DATABASE_URL=<url to pcc_test> uv run pytest` | `apps/api` |
 | Backend lint | `uv run ruff check src tests` | `apps/api` |
 
-**Backend test design:** validation-failure tests (blank, bad enum, invalid or oversized URLs, over-length text or title) use no database because they fail before any DB access. Tests that save a capture (`test_create_capture`, `test_list_captures`, and the accepted-input cases in `test_capture_validation.py`) use the `db_client` fixture. It refuses to run unless `TEST_DATABASE_URL` is set and the database name is exactly `pcc_test`. It then runs `Base.metadata.create_all` and `drop_all` around each test and overrides `get_db`. The tests therefore build schema from the models and **do not exercise the Alembic migrations**. CI provisions `pcc_test` through a Postgres service container; locally it must be created manually.
+**Backend test design:** all API endpoint tests in `test_captures.py` and `test_capture_validation.py` run through the `db_client` fixture. It refuses to run unless `TEST_DATABASE_URL` is set and the database name is exactly `pcc_test`. An autouse override blocks unisolated `get_db` usage so tests cannot accidentally hit development/production databases. The fixture runs `Base.metadata.create_all` and `drop_all` around each test and overrides `get_db`. The tests therefore build schema from the models and **do not exercise the Alembic migrations**. CI provisions `pcc_test` through a Postgres service container; locally it must be created manually.
 
 **Frontend test design:** only the Server Action is tested (success and reset, 422 field-error mapping, generic fallbacks for malformed bodies, 5xx and network failures, blank content, and the `source_type` returned to the form). `fetch` and `next/cache` are mocked in Vitest's default Node environment. There are no component tests, browser tests, or Vitest config file.
 
 **CI (`.github/workflows/ci.yml`)** runs on every push and PR:
 - Backend job: `uv sync`, `uv run pytest`, `uv run ruff check`.
-- Frontend job: `pnpm install --no-frozen-lockfile`, `pnpm lint:web`, `pnpm build:web`.
-- See Part C for gaps (no Postgres service, no frontend tests step).
+- Frontend job: `pnpm install --no-frozen-lockfile`, `pnpm lint:web`, `pnpm test:web`, `pnpm build:web`.
+- See Part C for remaining gaps (for example migration coverage and local `pcc_test` setup).
 
 ## A9. Verified architectural decisions
 

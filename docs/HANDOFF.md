@@ -16,7 +16,8 @@ Build PCC as a persistent personal system of record: captures, knowledge, tasks,
 ## Last confirmed working
 - Backend API, capture persistence, migrations, and isolated `pcc_test` test database.
 - **Milestone 1 (capture UX) and Milestone 2 (capture validation) complete and merged to `main`** (PR #1, "feat: Universal Capture v1").
-- Automated checks at the final commit: `pnpm lint:web` (typecheck), `pnpm test:web` 27/27 (Server Action tests), `pnpm build:web`, and backend `uv run pytest` 61/61 with `TEST_DATABASE_URL` pointing at `pcc_test` (39 pass and 22 DB tests error without it, by design).
+- Automated checks at the final commit: `pnpm lint:web` (typecheck), `pnpm test:web` 27/27 (Server Action tests), `pnpm build:web`, and backend `uv run pytest` 61/61 with `TEST_DATABASE_URL` pointing at `pcc_test`.
+- Durable test guidance: API endpoint tests are intentionally isolated through `db_client` and require `TEST_DATABASE_URL` targeting `pcc_test`; without it, endpoint tests fail fast instead of falling back to any non-test database.
 - **Browser acceptance passed** in real Chrome against a dev database (full stack: Next dev, uvicorn, local Postgres):
   - Invalid URL shows a field-level error under Content and keeps title, content and Type; correcting the URL without reselecting Type saves as `url`, appears in the Inbox, and resets the form (Type back to Text).
   - Text capture saves; multi-line content renders in the Inbox.
