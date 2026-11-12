@@ -1,5 +1,7 @@
 from functools import lru_cache
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://pcc:local_dev_only_change_me@localhost:5432/pcc"

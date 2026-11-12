@@ -1,5 +1,6 @@
 from redis import Redis
 from rq import Queue
+
 from pcc.core.config import get_settings
 from pcc.worker.jobs import sample_job
 
