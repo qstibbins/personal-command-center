@@ -1,6 +1,6 @@
 # Personal Command Center (PCC) — Development Roadmap
 
-**Last updated:** 2026-11-12  
+**Last updated:** 2026-11-12 (priorities confirmed; Milestones 3–5 restructured)  
 **Status convention:** `Verified` = supported by reported tests/observed behavior; `Implemented, awaiting acceptance` = code reportedly changed but not browser-verified; `Planned` = not yet delivered. Confirm against Git and the running app before closing a milestone.
 
 ## Delivery strategy
@@ -8,6 +8,20 @@
 Ship a **secure, privately deployed capture-and-Inbox v0.1** before building sophisticated AI agents. Keep the PCC website as a direct capture interface. Treat ChatGPT mobile interaction and historical data ingestion as important future requirements, but do not assume an integration exists before verifying it.
 
 Priorities below reflect the agreed sequence, not the order in which ideas were discussed.
+
+### Confirmed priority (2026-11-12)
+
+**Universal Capture v1 is complete** (Milestones 0–2, merged to `main` as PR #1, `636c026`). The agreed order of work from here:
+
+| Milestone | Focus | Depends on |
+|---|---|---|
+| 3 | Authentication, API security, and minimal private deployment, designed for future remote access | Universal Capture v1 |
+| 4 | ChatGPT ↔ PCC integration; first goal: create a capture from the standard ChatGPT iPhone app and see it in PCC's Inbox | Milestone 3, **and** the Milestone 4 feasibility gate |
+| 5 | Task, project, and knowledge capabilities | Milestone 3 (protected API); benefits from Milestone 4 as an input channel |
+| 6 | Historical conversation ingestion and knowledge review | Milestone 3; builds on Milestone 5 knowledge/task structures |
+| 7 | Background processing, AI agent orchestration, and monitoring | Milestones 3 and 5 (real records to act on); Milestone 6 optional input |
+
+**Renumbering note (nothing was dropped).** Before this update, Milestone 3 (authentication and production readiness) and Milestone 4 (first private deployment) were separate; their full scope is now combined in the new Milestone 3. The former Milestone 5 (ChatGPT integration) is now Milestone 4. The new Milestone 5 (task, project, and knowledge capabilities) draws on the product domains in `docs/PROJECT.md` and, previously, appeared only inside Milestones 6 and 7. Milestones 6 and 7 keep their numbers and scope. `docs/ARCHITECTURE.md` still uses the old numbers in places (see `docs/HANDOFF.md`).
 
 ## Milestone 0 — Foundation and first vertical slice
 
@@ -64,52 +78,75 @@ Delivered:
 
 ## Predeployment stabilization (before or alongside Milestone 3)
 
-**Status: Planned.** See the Project store `docs/predeployment-stabilization-notes.md`.
+**Status: Mostly done in PR #1; a few items remain.** See the Project store `docs/predeployment-stabilization-notes.md`.
 
-- [ ] Fix the 19 pre-existing backend Ruff errors (CI runs `ruff check src tests` and currently fails).
-- [ ] Add a `pnpm test:web` step to the CI frontend job.
-- [ ] Add a Postgres service and `TEST_DATABASE_URL` (`pcc_test`) to the CI backend job so DB-backed tests run.
-- [ ] Decide on component-level / browser regression coverage for the capture form.
+- [x] Fix the 19 pre-existing backend Ruff errors (CI `ruff check src tests` passes).
+- [x] Add a `pnpm test:web` step to the CI frontend job.
+- [x] Add a Postgres service and `TEST_DATABASE_URL` (`pcc_test`) to the CI backend job so DB-backed tests run; all API tests now go through the isolated `db_client` fixture.
+- [ ] Decide on component-level / browser regression coverage for the capture form (none exists; only the Server Action is unit-tested).
 - [ ] Refresh remaining stale docs and `.env.example`; use `--frozen-lockfile` in CI.
 
-## Milestone 3 — Authentication and production readiness
+## Milestone 3 — Authentication, API security, and minimal private deployment
 
-**Status: Planned.**
+**Status: Planned. Next action: finish the architecture assessment (below).** This milestone combines the former Milestone 3 (authentication and production readiness) and Milestone 4 (first private deployment, v0.1).
 
-- [ ] Choose a simple authentication approach appropriate for a single-user private deployment.
+**Design constraint: designed for future remote access.** The first deployment may be minimal and private, but it must not assume that the only client is a browser on the same machine. Choices made here should keep a later internet-reachable, HTTPS-protected endpoint possible without redesign, because Milestone 4 requires one (to be verified). In particular: no hard-coded `localhost` assumptions, configurable public/internal base URLs and allowed origins, and API authentication that a non-browser client can use.
+
+### Architecture assessment (first step, before implementation)
+- [ ] Choose a simple authentication approach appropriate for a single-user private deployment (website sign-in plus API credentials), and record it as a decision under `docs/decisions/`.
+- [ ] Decide how the Next.js server authenticates to FastAPI (today it calls the API unauthenticated) and how non-browser clients, such as a future ChatGPT integration, would authenticate.
+- [ ] Choose the hosting target and network exposure model (small VPS + Docker Compose is a candidate, not a final decision; private-only versus a public HTTPS endpoint with auth).
+- [ ] Inventory what production needs that does not exist yet: Dockerfiles, production config, secrets handling, deep health checks, request size limits and rate limiting, CORS/origin policy, migration procedure, backups.
+
+### Authentication and API security
 - [ ] Protect both website access and API endpoints; avoid relying on UI-only restrictions.
 - [ ] Configure secrets and environment variables securely; avoid leaking credentials to the browser.
-- [ ] Verify production builds, database migration procedure, and health checks.
-- [ ] Document recovery, access, and deployment steps.
 
-**Exit criterion:** PCC can be deployed without exposing personal captures or unauthenticated write endpoints.
-
-## Milestone 4 — First private deployment (v0.1)
-
-**Status: Planned.**
-
-- [ ] Select hosting (small VPS + Docker Compose is a candidate, not a final decision).
-- [ ] Configure HTTPS, domain/access, persistent PostgreSQL storage, and backups.
-- [ ] Run migrations and start services using production configuration.
+### Minimal private deployment (v0.1)
+- [ ] Select hosting and configure HTTPS, domain/access, persistent PostgreSQL storage, and backups.
+- [ ] Verify production builds, the database migration procedure, and health checks; run migrations and start services with production configuration.
 - [ ] Verify sign-in, capture, Inbox retrieval, refresh, service restart, and data persistence.
-- [ ] Verify backup/recovery procedure and document repeatable deploy/rollback steps.
+- [ ] Verify backup/recovery and document repeatable deploy, rollback, recovery, and access steps.
 
-**Exit criterion:** PCC is accessible at a secure private URL and the capture workflow survives a restart.
+**Exit criterion:** PCC is deployed at a secure private URL without exposing personal captures or unauthenticated write endpoints, the capture workflow survives a restart, and nothing in the design blocks later remote access.
 
-## Milestone 5 — ChatGPT ↔ PCC integration
+## Milestone 4 — ChatGPT ↔ PCC integration
 
-**Status: Planned; feasibility gate first.**
+**Status: Planned; blocked on the feasibility gate and Milestone 3.** (Formerly Milestone 5.)
 
-- [ ] Confirm what secure custom app/tool/MCP-style integration the **standard ChatGPT app**, particularly on iPhone, supports for this account and use case.
-- [ ] Define minimal authorized operations, starting with save capture and retrieve selected information.
-- [ ] Implement authenticated PCC-facing tool endpoints or adapter appropriate to supported integration.
-- [ ] Test end-to-end from an actual supported ChatGPT client; verify permissions and error handling.
+**First goal:** create a capture from the standard ChatGPT iPhone app and see it in PCC's Inbox.
 
-**Exit criterion:** If supported, an instruction issued from the ordinary assistant client can operate PCC and the result appears on the website. If unsupported, record the limitation and choose an alternative without claiming parity with Claude.
+### Feasibility gate (complete and record before any implementation)
+Do not assume that custom MCP or tool support works in the standard iPhone client. Verify against current OpenAI documentation and an actual device and account, and record the findings:
+- [ ] **Supported mechanism:** what integration types the standard ChatGPT app supports for this account/plan (for example custom connectors, MCP servers, or GPT Actions), and which is appropriate for "save capture".
+- [ ] **Mobile availability:** whether that mechanism actually works in the standard ChatGPT iPhone app, not only on web or desktop.
+- [ ] **Authentication requirements:** what auth the mechanism requires (for example OAuth versus API key), and how it maps to PCC's Milestone 3 authentication.
+- [ ] **Network accessibility:** what reachability ChatGPT requires (for example a public HTTPS endpoint), and whether that is compatible with the Milestone 3 exposure model.
+- [ ] If unsupported, record the limitation and choose an alternative without claiming parity with other assistants.
+
+### Implementation (only after the gate passes)
+- [ ] Define minimal authorized operations, starting with save capture, then retrieve selected information.
+- [ ] Implement authenticated PCC-facing tool endpoints or an adapter appropriate to the verified mechanism.
+- [ ] Test end-to-end from an actual supported ChatGPT client (the iPhone app); verify permissions and error handling.
+
+**Exit criterion:** If supported, an instruction issued from the standard ChatGPT iPhone app creates a capture that appears in PCC's Inbox. If unsupported, the limitation is recorded and an alternative is chosen.
+
+## Milestone 5 — Task, project, and knowledge capabilities
+
+**Status: Planned. Scope to be detailed before starting.** (New milestone; consolidates product domains from `docs/PROJECT.md`.)
+
+- [ ] Review and promote captures into tasks and projects (a capture is not automatically a task).
+- [ ] Task and project data model, API, and UI, with review before inferred tasks become commitments.
+- [ ] Knowledge search, retrieval, and linking that retain originals and provenance.
+- [ ] Keep distinctions between speculation, confirmed decisions, and approved actions.
+
+**Dependencies:** a protected API (Milestone 3). Milestones 6 and 7 build on these records.
+
+**Exit criterion:** Captures can be organized into projects and tasks and found again, with traceable provenance. Detailed acceptance criteria to be written when the milestone starts.
 
 ## Milestone 6 — Historical conversation ingestion and knowledge review
 
-**Status: Planned.**
+**Status: Planned.** Depends on Milestone 3; the review/extraction steps build on the Milestone 5 task, project, and knowledge structures.
 
 - [ ] Inspect a real ChatGPT export and define supported import format(s).
 - [ ] Import conversations with timestamps, titles, messages, and source provenance when available.
@@ -121,7 +158,7 @@ Delivered:
 
 ## Milestone 7 — Background processing, agents, and observability
 
-**Status: Planned.**
+**Status: Planned.** AI agent orchestration and monitoring. Depends on Milestone 3 and on real records to act on (Milestone 5); historical import (Milestone 6) is an optional input.
 
 - [ ] Use Redis/RQ for reliable background processing of captured material.
 - [ ] Introduce AI provider abstraction, budgets, logging, and appropriate data handling.
