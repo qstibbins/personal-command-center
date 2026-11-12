@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 
 import { apiAuthHeaders, getApiBaseUrl } from "./api";
@@ -62,6 +63,7 @@ export default async function Home() {
       <header className="top-bar">
         <p className="eyebrow">PERSONAL COMMAND CENTER · V0.1</p>
         <div className="session-meta">
+          <Link href="/settings/api-tokens">API tokens</Link>
           <span className="muted">{email}</span>
           <SignOutButton signOutAction={signOutAction} />
         </div>

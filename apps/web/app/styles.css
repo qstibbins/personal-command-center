@@ -103,3 +103,52 @@
 .capture-form [aria-invalid="true"] {
   border-color: #a12626;
 }
+
+.scope-fieldset {
+  border: 1px solid #e1e7f0;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 0;
+}
+
+.scope-fieldset legend {
+  font-weight: 600;
+  font-size: 0.9rem;
+  padding: 0 4px;
+}
+
+.scope-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+  margin: 8px 0;
+}
+
+.token-reveal {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.token-reveal textarea {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid #d4dce8;
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85rem;
+  background: #fff;
+  color: #172339;
+}
+
+.session-meta a {
+  color: #284d91;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.session-meta a:hover {
+  text-decoration: underline;
+}

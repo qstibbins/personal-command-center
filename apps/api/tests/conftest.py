@@ -7,7 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 
-from pcc.api.captures import get_db
+from pcc.api.deps import get_db
 from pcc.core.config import get_settings
 from pcc.db.base import Base
 from pcc.main import app

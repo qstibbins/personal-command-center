@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from pcc.api.api_tokens import router as api_tokens_router
 from pcc.api.captures import router as captures_router
 
 app = FastAPI(
@@ -8,6 +9,7 @@ app = FastAPI(
 )
 
 app.include_router(captures_router)
+app.include_router(api_tokens_router)
 
 
 @app.get("/api/v1/health")

@@ -1,16 +1,15 @@
-from collections.abc import Generator
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
+from pcc.api.deps import get_db
 from pcc.auth import (
     SCOPE_CAPTURES_READ,
     SCOPE_CAPTURES_WRITE,
     AuthPrincipal,
     require_scopes,
 )
-from pcc.db.session import SessionLocal
 from pcc.schemas.capture import CaptureCreate, CaptureRead
 from pcc.services.captures import create_capture, list_captures
 
@@ -18,14 +17,6 @@ router = APIRouter(
     prefix="/api/v1/captures",
     tags=["captures"],
 )
-
-
-def get_db() -> Generator[Session, None, None]:
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
 
 
 @router.post("", response_model=CaptureRead, status_code=201)

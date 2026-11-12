@@ -88,7 +88,7 @@ Delivered:
 
 ## Milestone 3 — Authentication, API security, and minimal private deployment
 
-**Status: In progress. Milestone 3.1 (ADR) complete; Milestone 3.2 (FastAPI service-credential auth + scopes) complete; Milestone 3.3 (Auth.js v5 Google sign-in, PostgreSQL database sessions, page/Server Action protection) implemented in code — real Google OAuth browser acceptance still required. Remaining for Milestone 3: API token issuance and private deployment.** This milestone combines the former Milestone 3 (authentication and production readiness) and Milestone 4 (first private deployment, v0.1).
+**Status: In progress. Milestone 3.1 (ADR) complete; Milestone 3.2 (FastAPI service-credential auth + scopes) complete; Milestone 3.3 (Auth.js v5 Google sign-in, PostgreSQL database sessions, page/Server Action protection) complete in code — real Google OAuth browser acceptance still required; Milestone 3.4 (scoped/revocable API tokens) complete in code. Remaining for Milestone 3: private deployment.** This milestone combines the former Milestone 3 (authentication and production readiness) and Milestone 4 (first private deployment, v0.1).
 
 **Design constraint: designed for future remote access.** The first deployment may be minimal and private, but it must not assume that the only client is a browser on the same machine. Choices made here should keep a later internet-reachable, HTTPS-protected endpoint possible without redesign. ChatGPT iPhone feasibility remains a **Milestone 4 gate**, not a Milestone 3 completion requirement. In particular: no hard-coded `localhost` assumptions, configurable public/internal base URLs and allowed origins, and API authentication that a non-browser client can use.
 
@@ -103,7 +103,7 @@ Delivered:
 - [x] **Milestone 3.3:** Protect website access (Auth.js v5 + Google verified-email allowlist + PostgreSQL database sessions) and Server Actions with server-side session checks (ADR 0003). Sign-out deletes the Auth.js `sessions` row. Local setup: `docs/google-signin-local.md`. _Browser OAuth acceptance with a real Google client still pending._
 - [x] Document service-credential and Auth.js / Google OAuth environment variables for local development (`.env.example`, README, `docs/google-signin-local.md`); keep secrets server-only.
 - [ ] Configure remaining production secrets and Auth.js / Google OAuth variables for the private deployment.
-- [ ] Personal / integration API token issuance (hashed, scoped, revocable) — still out of scope for 3.3.
+- [x] **Milestone 3.4:** Personal / integration API token issuance (hashed SHA-256 storage, scopes `captures:read` / `captures:write`, revocable/expiring, owner-only create/list/revoke via allowlisted Auth.js session + FastAPI service-credential management routes). Raw token shown once. ChatGPT wiring remains Milestone 4.
 
 ### Minimal private deployment (v0.1)
 - [ ] Select hosting and configure HTTPS, domain/access, persistent PostgreSQL storage, and backups.
