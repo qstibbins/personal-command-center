@@ -1,6 +1,6 @@
 # Personal Command Center (PCC) — Development Roadmap
 
-**Last updated:** 2026-11-09  
+**Last updated:** 2026-11-12  
 **Status convention:** `Verified` = supported by reported tests/observed behavior; `Implemented, awaiting acceptance` = code reportedly changed but not browser-verified; `Planned` = not yet delivered. Confirm against Git and the running app before closing a milestone.
 
 ## Delivery strategy
@@ -24,43 +24,53 @@ Priorities below reflect the agreed sequence, not the order in which ideas were 
 
 ## Milestone 1 — Reliable Capture UX
 
-**Status: Implemented by Cursor; awaiting browser acceptance and commit.**
+**Status: Verified (implemented, committed, and browser-accepted).**
 
-Cursor reported changes to:
-- `apps/web/app/actions.ts`: action-state result handling and returned errors/input values.
-- `apps/web/app/capture-state.ts`: state types/defaults.
-- `apps/web/app/capture-form.tsx`: React `useActionState`, pending, success, error, reset.
-- `apps/web/app/page.tsx`: uses the form component.
-- `apps/web/app/styles.css`: feedback styles.
-- `apps/web/app/actions.test.ts`: four action tests.
-
-Reported checks: `pnpm lint`, `pnpm test` (4/4), and `pnpm build` passed. **Cursor explicitly did not run a browser test, commit, or push these changes.**
+Delivered in `apps/web/app`: `actions.ts` (action-state handling, returned errors/input), `capture-state.ts`, `capture-form.tsx` (`useActionState`, pending, success, error, reset), `page.tsx`, `styles.css`, `actions.test.ts`.
 
 ### Acceptance checklist
 
-- [ ] Submit a valid text capture and see the item in the Inbox.
-- [ ] Observe disabled/“Saving…” state where timing permits.
-- [ ] See success feedback; form clears **only on success**.
-- [ ] Submit a second capture without reloading; behavior remains correct.
-- [ ] Submit whitespace-only content; error is shown and input preserved.
-- [ ] Simulate an API/network failure; error is shown and input preserved.
-- [ ] Address generated `apps/web/tsconfig.tsbuildinfo` ignore rule without committing build artifacts.
-- [ ] Review diff; commit and push verified work.
-- [ ] Update `docs/HANDOFF.md` with the real outcome.
-
-**Current immediate action:** Perform the browser acceptance test, then review and commit. No unrelated refactoring.
+- [x] Submit a valid text capture and see the item in the Inbox.
+- [ ] Observe disabled/"Saving…" state where timing permits. _Not observed in the browser (too brief locally); covered by code only._
+- [x] See success feedback; form clears **only on success**.
+- [x] Submit a second capture without reloading; behavior remains correct.
+- [ ] Submit whitespace-only content; error is shown and input preserved. _Unit-tested only; not run in the browser._
+- [x] Simulate an API/network failure; error is shown and input preserved.
+- [x] `*.tsbuildinfo` is ignored in `.gitignore`.
+- [x] Review diff; commit and push verified work.
+- [x] Update `docs/HANDOFF.md` with the real outcome.
 
 ## Milestone 2 — Capture validation and frontend coverage
 
-**Status: Planned.**
+**Status: Verified (implemented, committed, and browser-accepted on 2026-11-12).**
 
-- [ ] Define URL capture semantics: acceptable schemes, normalization, empty/invalid URL handling, and whether fetching remote content is in or out of scope.
-- [ ] Implement consistent frontend and backend validation.
-- [ ] Expand tests for valid/invalid text and URL captures and relevant form behavior.
-- [ ] Re-run lint, tests, build, and focused browser checks.
-- [ ] Commit and update handoff.
+Decisions:
+- FastAPI is authoritative. Titles and content are trimmed at the API; blank content is rejected.
+- URL captures: absolute `http`/`https` only with a valid host; embedded credentials rejected; max 2,048 chars; the trimmed original string is stored (no normalization). Remote content fetching is **out of scope**.
+- Text captures: max 100,000 chars; never URL-checked; internal whitespace and line breaks preserved.
+- The Server Action maps expected 422s to field-level errors and uses generic messages for network, 5xx, or malformed responses; user input is preserved on failure and the form resets only on success. URL rules are not duplicated in the frontend.
 
-**Exit criterion:** Users receive clear feedback for invalid inputs; accepted data is persisted correctly; regressions are covered.
+Delivered:
+- [x] Define URL capture semantics.
+- [x] Implement validation (API) and field-level error display (frontend).
+- [x] Tests: backend 61/61 with a Postgres `pcc_test` DB; frontend Server Action tests 27/27.
+- [x] Re-run typecheck, tests, build, and browser checks (invalid URL, correction without reselecting Type, text capture, backend down, success reset).
+- [x] Fix the regression found in acceptance: the Type select reset to Text after a failed submit.
+- [x] Commit and update handoff.
+
+**Remaining gap:** no component-level automated regression coverage (only the Server Action is unit-tested). Form behavior is verified manually in a browser. No jsdom/Testing Library or browser test tool has been added.
+
+**Exit criterion met:** users get clear feedback for invalid inputs; accepted data is persisted correctly; Server Action and API regressions are covered.
+
+## Predeployment stabilization (before or alongside Milestone 3)
+
+**Status: Planned.** See the Project store `docs/predeployment-stabilization-notes.md`.
+
+- [ ] Fix the 19 pre-existing backend Ruff errors (CI runs `ruff check src tests` and currently fails).
+- [ ] Add a `pnpm test:web` step to the CI frontend job.
+- [ ] Add a Postgres service and `TEST_DATABASE_URL` (`pcc_test`) to the CI backend job so DB-backed tests run.
+- [ ] Decide on component-level / browser regression coverage for the capture form.
+- [ ] Refresh remaining stale docs and `.env.example`; use `--frozen-lockfile` in CI.
 
 ## Milestone 3 — Authentication and production readiness
 
