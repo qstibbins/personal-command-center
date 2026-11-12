@@ -1,6 +1,5 @@
+import { apiAuthHeaders, getApiBaseUrl } from "./api";
 import { CaptureForm } from "./capture-form";
-
-const API_URL = process.env.API_INTERNAL_URL ?? "http://localhost:8000";
 
 type Health = {
   status: string;
@@ -18,7 +17,8 @@ type Capture = {
 
 async function getHealth(): Promise<Health | null> {
   try {
-    const response = await fetch(`${API_URL}/api/v1/health`, {
+    // Health is intentionally unauthenticated (ADR 0003 / Milestone 3.2).
+    const response = await fetch(`${getApiBaseUrl()}/api/v1/health`, {
       cache: "no-store",
     });
     if (!response.ok) return null;
@@ -30,8 +30,9 @@ async function getHealth(): Promise<Health | null> {
 
 async function getCaptures(): Promise<Capture[] | null> {
   try {
-    const response = await fetch(`${API_URL}/api/v1/captures`, {
+    const response = await fetch(`${getApiBaseUrl()}/api/v1/captures`, {
       cache: "no-store",
+      headers: apiAuthHeaders(),
     });
     if (!response.ok) return null;
     return (await response.json()) as Capture[];

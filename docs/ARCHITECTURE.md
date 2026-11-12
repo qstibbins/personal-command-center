@@ -21,7 +21,7 @@ Product intent lives in `PROJECT.md`, sequencing in `ROADMAP.md`, and the next a
 
 PCC is currently a **single-user capture-and-Inbox application**. A user submits text or a URL string through a web form. It is stored in PostgreSQL and listed in an Inbox. That is the only implemented product capability.
 
-- No authentication or authorization exists anywhere (UI or API).
+- FastAPI capture endpoints require a server-to-server service credential (`PCC_SERVICE_CREDENTIAL`) with scopes `captures:read` / `captures:write`. Website Google/Auth.js sign-in is not implemented yet; the UI is not user-authenticated.
 - No AI/LLM integration exists.
 - No code processes captures: they are stored as `pending` and never change status.
 - A Redis/RQ worker exists as infrastructure with a demo job only.
@@ -58,27 +58,29 @@ Browser ──HTML/RSC/Server Action──▶ Next.js (apps/web, :3000)
 **Create capture**
 1. User submits the form in `capture-form.tsx` (client component, `useActionState`).
 2. `createCapture(prevState, formData)` runs on the Next.js server. It reads `source_type`, `title`, `content` and trims title and content (the API trims again; see Validation limits).
-3. Empty content returns an error state without calling the API. Otherwise it `POST`s `{source_type, title|null, content}` to `${API_INTERNAL_URL ?? "http://localhost:8000"}/api/v1/captures`.
-4. FastAPI is the authority on validation: `CaptureCreate` trims and validates the body (422 on failure), then `create_capture` inserts a `Capture` row (status `pending`) and returns 201 with `CaptureRead`.
+3. Empty content returns an error state without calling the API. Otherwise it `POST`s `{source_type, title|null, content}` to `${API_INTERNAL_URL ?? "http://localhost:8000"}/api/v1/captures` with `Authorization: Bearer ${PCC_SERVICE_CREDENTIAL}` (server-only; never sent to the browser).
+4. FastAPI authenticates the service credential, requires `captures:write`, then validates: `CaptureCreate` trims and validates the body (422 on failure), then `create_capture` inserts a `Capture` row (status `pending`) and returns 201 with `CaptureRead`.
 5. A 422 is mapped to field-level errors (`title` / `content`) shown under the matching form field; other non-OK responses, malformed bodies, and thrown network errors return a generic error state. In every error case the user's raw input (including the selected type) is echoed back. Success returns empty values and calls `revalidatePath("/")`.
 
 **Load Inbox**
-1. `page.tsx` is a server component. It calls `GET /api/v1/health` and `GET /api/v1/captures` in parallel with `cache: "no-store"`. The captures call sends no `limit`, so the API default of 50 applies.
+1. `page.tsx` is a server component. It calls `GET /api/v1/health` (unauthenticated) and `GET /api/v1/captures` (Bearer service credential, `captures:read`) in parallel with `cache: "no-store"`. The captures call sends no `limit`, so the API default of 50 applies.
 2. A failure of either request yields `null`, and the UI shows "Unable to load captures" / "Not reachable".
 
-The browser never talks to FastAPI directly. All API calls originate from the Next.js server. This is why CORS is not currently needed.
+The browser never talks to FastAPI directly. All API calls originate from the Next.js server. The service credential must not use a `NEXT_PUBLIC_` prefix. This is why CORS is not currently needed.
 
 ## A3. API surface (verified)
 
 | Method & path | Behavior |
 |---|---|
-| `GET /api/v1/health` | Returns `{"status": "ok", "service": "pcc-api"}`. Does **not** check database or Redis. |
-| `POST /api/v1/captures` | Body: `source_type` (`"text"` or `"url"`), `title` (optional, max 300), `content` (trimmed; must not be blank). For `url` captures `content` must be an absolute `http`/`https` URL, at most 2,048 characters. For `text` captures it is at most 100,000 characters. Returns 201 and the capture. Invalid input returns 422 with errors on `body.title` / `body.content`. |
-| `GET /api/v1/captures` | Query `limit` (1–100, default 50). Returns captures ordered by `created_at` desc, then `id` desc. |
+| `GET /api/v1/health` | Unauthenticated. Returns `{"status": "ok", "service": "pcc-api"}`. Does **not** check database or Redis. |
+| `POST /api/v1/captures` | Requires Bearer auth with scope `captures:write`. Body: `source_type` (`"text"` or `"url"`), `title` (optional, max 300), `content` (trimmed; must not be blank). For `url` captures `content` must be an absolute `http`/`https` URL, at most 2,048 characters. For `text` captures it is at most 100,000 characters. Returns 201 and the capture. Missing/invalid credentials → 401; insufficient scope → 403; invalid input → 422 with errors on `body.title` / `body.content`. |
+| `GET /api/v1/captures` | Requires Bearer auth with scope `captures:read`. Query `limit` (1–100, default 50). Returns captures ordered by `created_at` desc, then `id` desc. |
 
-FastAPI also serves its automatic OpenAPI docs (`/docs`, `/openapi.json`) because no override exists.
+FastAPI also serves its automatic OpenAPI docs (`/docs`, `/openapi.json`) because no override exists. Calling protected endpoints from `/docs` requires a Bearer token.
 
-**Not implemented:** get-by-id, update, delete, search, pagination beyond `limit`, task or project endpoints, any auth.
+**Auth (Milestone 3.2):** `pcc.auth` verifies `Authorization: Bearer` against `PCC_SERVICE_CREDENTIAL` (and optional `PCC_SERVICE_CREDENTIAL_PREVIOUS` for rotation). The service principal receives both capture scopes. `require_scopes(...)` is the reusable authorization dependency for future API tokens. Website Auth.js / Google sign-in and personal API token issuance are not implemented.
+
+**Not implemented:** get-by-id, update, delete, search, pagination beyond `limit`, task or project endpoints, user sign-in, API token CRUD.
 
 **Validation rules (`schemas/capture.py`, enforced by FastAPI):**
 - `title` and `content` have leading/trailing whitespace trimmed; internal whitespace and line breaks are preserved. A blank title becomes `null`; blank content is rejected. Title max is 300 characters.
@@ -118,13 +120,14 @@ apps/api/
   migrations/             # env.py reads DATABASE_URL via pcc.core.config (overrides alembic.ini URL)
   src/pcc/
     main.py               # FastAPI app, health route, includes captures router
-    api/captures.py       # routes + get_db dependency
+    api/captures.py       # routes + get_db + require_scopes
+    auth/                 # principals, credential verification, require_scopes
     schemas/capture.py    # Pydantic models
     services/captures.py  # business/data logic
     db/{base,models,session}.py
-    core/config.py        # pydantic-settings: database_url, redis_url (reads .env in cwd)
+    core/config.py        # pydantic-settings: database_url, redis_url, service credential
     worker/{main,jobs,submit_demo}.py
-  tests/                  # conftest.py, test_captures.py, test_health.py
+  tests/                  # conftest.py, test_captures.py, test_capture_validation.py, test_auth.py, test_health.py
 ```
 
 The layering is route → service → SQLAlchemy model, with Pydantic schemas at the boundary. Sessions are created per request by `get_db`. Services call `commit()` themselves.
@@ -138,10 +141,11 @@ apps/web/
   app/
     layout.tsx            # root layout, metadata, imports styles.css
     page.tsx              # server component: health + Inbox + <CaptureForm/>
+    api.ts                # server-only API base URL + Bearer credential headers
     capture-form.tsx      # "use client" form (useActionState)
     capture-state.ts      # CaptureFormState type + initialCaptureState
     actions.ts            # "use server" createCapture
-    actions.test.ts       # 27 Vitest tests of createCapture
+    actions.test.ts       # Vitest tests of createCapture (includes auth header checks)
     styles.css            # global CSS (no CSS framework)
 ```
 
@@ -158,10 +162,12 @@ State types live in `capture-state.ts` because a `"use server"` module may only 
 | `DATABASE_URL` | Yes (`core/config.py`, Alembic) | |
 | `REDIS_URL` | Yes (worker) | |
 | `POSTGRES_USER/PASSWORD/DB` | Yes (Compose) | Defaults in `compose.yaml` |
-| `API_INTERNAL_URL` | Yes (`actions.ts`, `page.tsx`) | Defaults to `http://localhost:8000`. **Not listed in `.env.example`.** |
-| `TEST_DATABASE_URL` | Yes (`tests/conftest.py`) | Must point at a database named `pcc_test`. **Not listed in `.env.example`.** |
-| `API_CORS_ORIGINS` | **No** | In `.env.example`; no CORS middleware exists. |
-| `NEXT_PUBLIC_API_BASE_URL` | **No** | In `.env.example`; not referenced by web code. |
+| `PCC_SERVICE_CREDENTIAL` | Yes (FastAPI `core/config.py`; Next.js `app/api.ts`) | Server-only shared secret for capture endpoints. |
+| `PCC_SERVICE_CREDENTIAL_PREVIOUS` | Yes (FastAPI) | Optional dual-read during rotation. |
+| `API_INTERNAL_URL` | Yes (`app/api.ts`) | Defaults to `http://localhost:8000`. |
+| `TEST_DATABASE_URL` | Yes (`tests/conftest.py`) | Must point at a database named `pcc_test`. |
+| `API_CORS_ORIGINS` | **No** | Commented in `.env.example`; no CORS middleware exists. |
+| `NEXT_PUBLIC_API_BASE_URL` | **No** | Commented in `.env.example`; not referenced by web code. |
 
 Secrets: only a local development password default exists. `.env` files are gitignored.
 

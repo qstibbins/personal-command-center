@@ -46,17 +46,20 @@ Details: Project store `docs/predeployment-stabilization-notes.md`.
 - Future risk to design for if URLs are ever fetched server-side: accepted URLs include localhost/private hosts, so fetching would need SSRF controls.
 
 ## Immediate next step
-**Milestone 3.1 architecture planning is complete.** Implement Milestone 3 authentication and API protection according to `docs/decisions/0003-m3-auth-security-design.md` (Google sign-in with verified-email allowlist, Auth.js v5 + PostgreSQL database sessions, pages and Server Actions protected, FastAPI-enforced scopes `captures:read`/`captures:write`, server-side Next.js→FastAPI service credential with rotation procedure, scoped revocable API tokens, private HTTPS-first deployment).
+**Milestone 3.2 (FastAPI service-credential auth) is implemented.** Capture endpoints require Bearer auth; scopes `captures:read` / `captures:write`; Next.js server calls send `PCC_SERVICE_CREDENTIAL` (see `.env.example`). Health stays open. Automated auth tests cover 401/403/success and credential non-leakage.
 
-Acceptance checks to run after implementation: allowlist enforcement; database-session sign-out/revocation blocks protected pages and Server Actions; unauthorized API denial; service-credential enforcement after rotation; scoped token revocation. Unresolved Milestone 3 implementation items remain final ingress model and Auth.js migration ownership. ChatGPT iPhone feasibility stays a Milestone 4 gate.
+**Next:** Milestone 3.3+ per ADR 0003 — Auth.js v5 Google sign-in with verified-email allowlist, database sessions, protect pages and Server Actions, then scoped API token issuance and private HTTPS deployment.
+
+Acceptance checks still outstanding for full Milestone 3: allowlist enforcement; database-session sign-out/revocation; API token revocation; deployment. Unresolved items remain final ingress model and Auth.js migration ownership. ChatGPT iPhone feasibility stays a Milestone 4 gate.
 
 ## Deployment sequence
 1. ~~Finish capture UX and tests.~~ Done (Universal Capture v1).
 2. ~~Milestone 3.1 architecture assessment.~~ Done (ADR 0003).
-3. **Milestone 3:** implement authentication and API protection, secrets and production configuration per ADR 0003.
-4. **Milestone 3:** deploy a minimal private v0.1 (small VPS / Docker Compose candidate), HTTPS, persistent Postgres, backups, migrations, health checks; design for future remote access.
-5. Verify capture persistence, authentication (including session revocation), service restarts, and recovery.
-6. **Milestone 4:** verify then build ChatGPT↔PCC integration (first goal: capture from the standard ChatGPT iPhone app appears in the Inbox). Then task/project/knowledge capabilities (M5), historical ingestion (M6), and agent orchestration/monitoring (M7).
+3. ~~Milestone 3.2 FastAPI service-credential auth + scopes.~~ Done (this change).
+4. **Milestone 3:** Auth.js / Google website auth, API token issuance, secrets and production configuration per ADR 0003.
+5. **Milestone 3:** deploy a minimal private v0.1 (small VPS / Docker Compose candidate), HTTPS, persistent Postgres, backups, migrations, health checks; design for future remote access.
+6. Verify capture persistence, authentication (including session revocation), service restarts, and recovery.
+7. **Milestone 4:** verify then build ChatGPT↔PCC integration (first goal: capture from the standard ChatGPT iPhone app appears in the Inbox). Then task/project/knowledge capabilities (M5), historical ingestion (M6), and agent orchestration/monitoring (M7).
 
 ## Integration principles
 - Calling OpenAI API from PCC is different from exposing PCC tools to the standard ChatGPT app.
