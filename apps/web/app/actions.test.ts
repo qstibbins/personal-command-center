@@ -289,4 +289,59 @@ describe("createCapture", () => {
 
     expect(state.message).not.toContain("10.0.0.5");
   });
+
+  // The form shows state.values.source_type after every action, so this is the
+  // contract that keeps the Type select in sync with what was submitted.
+  describe("source_type in the returned state", () => {
+    const submit = () =>
+      createCapture(
+        initialCaptureState,
+        makeForm({ source_type: "url", title: "T", content: "example.com" }),
+      );
+
+    it.each([
+      ["a 422 response", () => unprocessable([{ loc: ["body", "content"], msg: "bad" }])],
+      ["a generic 422 response", () => unprocessable([])],
+      ["a 5xx response", () => ({ ok: false, status: 500 })],
+    ])("keeps url after %s", async (_label, makeResponse) => {
+      fetchMock.mockResolvedValue(makeResponse());
+
+      expect((await submit()).values.source_type).toBe("url");
+    });
+
+    it("keeps url when the API is unreachable", async () => {
+      fetchMock.mockRejectedValue(new Error("ECONNREFUSED"));
+
+      expect((await submit()).values.source_type).toBe("url");
+    });
+
+    it("keeps url when client-side blank validation fails", async () => {
+      const state = await createCapture(
+        initialCaptureState,
+        makeForm({ source_type: "url", title: "", content: "  " }),
+      );
+
+      expect(state.values.source_type).toBe("url");
+    });
+
+    it("resets to text only after a successful save", async () => {
+      fetchMock.mockResolvedValue({ ok: true, status: 201 });
+
+      const state = await submit();
+
+      expect(state.status).toBe("success");
+      expect(state.values.source_type).toBe("text");
+    });
+
+    it("submits exactly the selected type", async () => {
+      fetchMock.mockResolvedValue({ ok: true, status: 201 });
+
+      await createCapture(
+        initialCaptureState,
+        makeForm({ source_type: "url", title: "", content: "https://example.com" }),
+      );
+
+      expect(JSON.parse(fetchMock.mock.calls[0][1].body).source_type).toBe("url");
+    });
+  });
 });
