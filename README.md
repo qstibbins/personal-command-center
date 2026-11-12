@@ -15,12 +15,24 @@ Initial Next.js + FastAPI monorepo scaffold for a personal Second Brain and Chie
 Use several Terminal tabs (infrastructure/setup, API, web, and optionally the worker), starting from the repository root.
 
 1. **Infrastructure**: `cp .env.example .env` then `docker compose up -d`
-2. **Python dependencies and migrations**: `cd apps/api && uv sync --group dev && uv run alembic upgrade head`
-3. **API** (same `apps/api` directory): `uv run uvicorn pcc.main:app --reload --host 127.0.0.1 --port 8000`
-4. **Web** (repository root): `pnpm install && pnpm dev:web`
-5. **Worker** (new tab in `apps/api`): `uv run python -m pcc.worker.main`
+2. **Service credential**: set the same `PCC_SERVICE_CREDENTIAL` value for the API and Next.js processes (see `.env.example`). Capture create/list require it; do not use a `NEXT_PUBLIC_` prefix.
+3. **Python dependencies and migrations**: `cd apps/api && uv sync --group dev && uv run alembic upgrade head`
+4. **API** (same `apps/api` directory): `uv run uvicorn pcc.main:app --reload --host 127.0.0.1 --port 8000`
+5. **Web** (repository root): `pnpm install && pnpm dev:web` (loads `PCC_SERVICE_CREDENTIAL` / `API_INTERNAL_URL` from the environment or root `.env` via your shell)
+6. **Worker** (new tab in `apps/api`): `uv run python -m pcc.worker.main`
 
 Visit http://localhost:3000 and http://localhost:8000/docs. The home page should show **FastAPI: Connected**.
+
+### Local API authentication (Milestone 3.2)
+
+| Variable | Used by | Purpose |
+|---|---|---|
+| `PCC_SERVICE_CREDENTIAL` | FastAPI + Next.js (server-only) | Shared secret; send as `Authorization: Bearer <value>` |
+| `PCC_SERVICE_CREDENTIAL_PREVIOUS` | FastAPI (optional) | Previous secret accepted during planned rotation |
+| `API_INTERNAL_URL` | Next.js (server-only) | FastAPI base URL (default `http://localhost:8000`) |
+| `TEST_DATABASE_URL` | Backend tests | Must target a database named `pcc_test` |
+
+`GET /api/v1/health` stays unauthenticated. `GET /api/v1/captures` requires scope `captures:read`; `POST /api/v1/captures` requires `captures:write`. The service credential grants both. Google sign-in, Auth.js, and personal API token issuance are not implemented yet (see ADR 0003).
 
 ### Test a background job
 
@@ -47,9 +59,9 @@ At the root: `pnpm lint:web && pnpm test:web && pnpm build:web`.
 
 ## What is and isn't included
 
-Included: a Universal Capture web form (text or URL, with pending, success, and error feedback) and an Inbox listing saved captures; FastAPI endpoints `GET /api/v1/health`, `POST /api/v1/captures`, and `GET /api/v1/captures`; SQLAlchemy models and Alembic migrations (`captures`, plus unused `projects` and `tasks` tables); PostgreSQL; Redis and an RQ worker with a demo job only; backend and frontend tests; CI; and ADRs. See `docs/ARCHITECTURE.md` for details.
+Included: a Universal Capture web form (text or URL, with pending, success, and error feedback) and an Inbox listing saved captures; FastAPI endpoints `GET /api/v1/health`, `POST /api/v1/captures`, and `GET /api/v1/captures`; FastAPI service-credential authentication with scopes `captures:read` / `captures:write` on capture endpoints; SQLAlchemy models and Alembic migrations (`captures`, plus unused `projects` and `tasks` tables); PostgreSQL; Redis and an RQ worker with a demo job only; backend and frontend tests; CI; and ADRs. See `docs/ARCHITECTURE.md` for details.
 
-Not yet included: authentication, file uploads, object storage, task and project APIs, URL validation or fetching, capture processing, AI integrations, ChatGPT integration, ChatGPT history import, agents, PWA offline support, production Dockerfiles, TLS, backups, and hardened security. **Do not expose this scaffold to the internet or upload private journal entries yet.**
+Not yet included: website Google sign-in / Auth.js, personal API token issuance UI, file uploads, object storage, task and project APIs, URL remote fetching, capture processing, AI integrations, ChatGPT integration, ChatGPT history import, agents, PWA offline support, production Dockerfiles, TLS, backups, and full production hardening. **Do not expose this scaffold to the internet or upload private journal entries yet.**
 
 ## Architecture
 
@@ -71,4 +83,4 @@ The database is the system of record; the worker is for slow tasks; the AI provi
 
 ## Next milestone
 
-Browser-verify and commit the improved capture form, then add URL validation and frontend coverage, followed by authentication and a first private deployment. See `docs/ROADMAP.md`.
+Continue Milestone 3 per ADR 0003: website Google sign-in (Auth.js v5), protecting pages and Server Actions with sessions, then private deployment. See `docs/ROADMAP.md`.

@@ -2,13 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 
+import { apiAuthHeaders, getApiBaseUrl } from "./api";
 import {
   initialCaptureState,
   type CaptureFieldErrors,
   type CaptureFormState,
 } from "./capture-state";
-
-const API_URL = process.env.API_INTERNAL_URL ?? "http://localhost:8000";
 
 const REJECTED_MESSAGE =
   "The capture was rejected. Check your input and try again.";
@@ -69,9 +68,9 @@ export async function createCapture(
   }
 
   try {
-    const response = await fetch(`${API_URL}/api/v1/captures`, {
+    const response = await fetch(`${getApiBaseUrl()}/api/v1/captures`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: apiAuthHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
         source_type,
         title: title || null,

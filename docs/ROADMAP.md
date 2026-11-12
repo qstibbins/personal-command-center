@@ -88,7 +88,7 @@ Delivered:
 
 ## Milestone 3 — Authentication, API security, and minimal private deployment
 
-**Status: Planned. Milestone 3.1 architecture decisions are complete in `docs/decisions/0003-m3-auth-security-design.md`; next action is implementation and verification per that ADR.** This milestone combines the former Milestone 3 (authentication and production readiness) and Milestone 4 (first private deployment, v0.1).
+**Status: In progress. Milestone 3.1 (ADR) complete; Milestone 3.2 (FastAPI service-credential auth + scopes) implemented on the API and Next.js server calls. Remaining: website Google/Auth.js sign-in, API token issuance, and private deployment.** This milestone combines the former Milestone 3 (authentication and production readiness) and Milestone 4 (first private deployment, v0.1).
 
 **Design constraint: designed for future remote access.** The first deployment may be minimal and private, but it must not assume that the only client is a browser on the same machine. Choices made here should keep a later internet-reachable, HTTPS-protected endpoint possible without redesign. ChatGPT iPhone feasibility remains a **Milestone 4 gate**, not a Milestone 3 completion requirement. In particular: no hard-coded `localhost` assumptions, configurable public/internal base URLs and allowed origins, and API authentication that a non-browser client can use.
 
@@ -99,8 +99,10 @@ Delivered:
 - [ ] Inventory what production needs that does not exist yet: Dockerfiles, production config, secrets handling, deep health checks, request size limits and rate limiting, CORS/origin policy, migration procedure, backups.
 
 ### Authentication and API security
-- [ ] Protect both website access and API endpoints; avoid relying on UI-only restrictions.
-- [ ] Configure secrets and environment variables securely; avoid leaking credentials to the browser.
+- [x] **Milestone 3.2:** Protect capture API endpoints with FastAPI auth (`captures:read` / `captures:write`); Next.js server sends `PCC_SERVICE_CREDENTIAL` as a Bearer token (never to the browser). Health remains public. Auth module is centralized for future API tokens. Google sign-in / Auth.js and personal API token issuance are **not** done yet.
+- [ ] Protect website access (Auth.js v5 + Google allowlist) and Server Actions with sessions (ADR 0003).
+- [x] Document service-credential environment variables for local development (`.env.example`, README); keep secrets server-only.
+- [ ] Configure remaining production secrets and Auth.js / Google OAuth variables.
 
 ### Minimal private deployment (v0.1)
 - [ ] Select hosting and configure HTTPS, domain/access, persistent PostgreSQL storage, and backups.

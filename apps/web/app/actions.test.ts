@@ -1,11 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+vi.mock("server-only", () => ({}));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 import { revalidatePath } from "next/cache";
 
 import { createCapture } from "./actions";
 import { initialCaptureState } from "./capture-state";
+
+const TEST_SERVICE_CREDENTIAL = "test-web-service-credential-not-for-production";
 
 function makeForm(fields: Record<string, string>) {
   const formData = new FormData();
@@ -22,12 +25,14 @@ describe("createCapture", () => {
 
   beforeEach(() => {
     vi.stubGlobal("fetch", fetchMock);
+    process.env.PCC_SERVICE_CREDENTIAL = TEST_SERVICE_CREDENTIAL;
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
     fetchMock.mockReset();
     vi.mocked(revalidatePath).mockReset();
+    delete process.env.PCC_SERVICE_CREDENTIAL;
   });
 
   it("returns success with cleared values and revalidates when saved", async () => {
@@ -41,8 +46,11 @@ describe("createCapture", () => {
     expect(state.status).toBe("success");
     expect(state.values).toEqual(initialCaptureState.values);
     expect(revalidatePath).toHaveBeenCalledWith("/");
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
+    const [, init] = fetchMock.mock.calls[0];
+    const body = JSON.parse(init.body);
     expect(body).toEqual({ source_type: "text", title: "Idea", content: "Hello" });
+    expect(init.headers.Authorization).toBe(`Bearer ${TEST_SERVICE_CREDENTIAL}`);
+    expect(JSON.stringify(state)).not.toContain(TEST_SERVICE_CREDENTIAL);
   });
 
   it("preserves input and does not revalidate on HTTP failure", async () => {
@@ -288,6 +296,36 @@ describe("createCapture", () => {
     );
 
     expect(state.message).not.toContain("10.0.0.5");
+  });
+
+  it("sends the service credential on every API call and never returns it", async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 201 });
+
+    const state = await createCapture(
+      initialCaptureState,
+      makeForm({ source_type: "text", title: "", content: "secret-safe" }),
+    );
+
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe(
+      `Bearer ${TEST_SERVICE_CREDENTIAL}`,
+    );
+    expect(JSON.stringify(state)).not.toContain(TEST_SERVICE_CREDENTIAL);
+    expect(JSON.stringify(state)).not.toContain("Authorization");
+  });
+
+  it("fails closed without calling fetch when the service credential is missing", async () => {
+    delete process.env.PCC_SERVICE_CREDENTIAL;
+
+    const state = await createCapture(
+      initialCaptureState,
+      makeForm({ source_type: "text", title: "", content: "keep" }),
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(state.status).toBe("error");
+    expect(state.values.content).toBe("keep");
+    expect(state.message).not.toContain("PCC_SERVICE_CREDENTIAL");
+    expect(JSON.stringify(state)).not.toContain(TEST_SERVICE_CREDENTIAL);
   });
 
   // The form shows state.values.source_type after every action, so this is the
