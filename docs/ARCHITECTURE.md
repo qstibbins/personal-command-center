@@ -1,7 +1,7 @@
 # Personal Command Center (PCC) — Architecture
 
-**Last updated:** 2026-11-12 (Milestone 3.4 scoped API tokens)
-**Branch inspected:** `feature/m3-api-tokens` (built on `main` through Milestone 3.3 / PR #5)
+**Last updated:** 2026-11-12 (Milestone 3.5a Render deployment ADR)
+**Branch inspected:** `main` through Milestone 3.4 (`d608cee`); deployment design on docs branch
 
 ## How to read this document
 
@@ -28,7 +28,7 @@ PCC is currently a **single-user capture-and-Inbox application**. A user signs i
 - No code processes captures: they are stored as `pending` and never change status.
 - A Redis/RQ worker exists as infrastructure with a demo job only.
 
-The README states this is "a development foundation, not a production-ready app" and warns against exposing it to the internet. That warning remains accurate until private HTTPS deployment.
+The README states this is "a development foundation, not a production-ready app" and warns against exposing it to the internet. That warning remains accurate until the Render private HTTPS deployment (ADR 0004) is provisioned; design is accepted, resources are not yet created.
 
 ## A2. Components and responsibilities
 
@@ -254,6 +254,7 @@ Prerequisites per README: Docker, Node 22, pnpm 10.11.0, Python 3.12+, `uv`.
 | `packages/api-client` reserved for OpenAPI-generated client | **Placeholder only** (a README). The web app hand-writes its types. |
 | Tests protect real data via `pcc_test` guard | Implemented in `conftest.py`. |
 | **ADR 0003** Google/Auth.js database sessions + FastAPI service credential + scoped API tokens | Milestones 3.2–3.4 implemented in code; private deploy remains. |
+| **ADR 0004** Render hosting: public Next.js, private FastAPI, managed Postgres | Design accepted (docs only). No Dockerfiles/`render.yaml`/live services yet. Redis/worker deferred. |
 
 ## A10. Verification status
 
@@ -275,13 +276,16 @@ Everything below comes from `PROJECT.md`, `ROADMAP.md`, `HANDOFF.md`, and the AD
 ## B1. Authentication, API security, and minimal private deployment (Roadmap M3)
 **Partial delivery:** Milestone 3.1 (ADR 0003) is accepted. **Milestones 3.2–3.4** are implemented in Part A: FastAPI service credential + scopes; Auth.js Google sign-in with PostgreSQL database sessions; hashed scoped revocable API tokens with owner-only management UI. Health remains unauthenticated at the API. Real Google OAuth browser acceptance for 3.3 may still be pending after merge.
 
-**Still planned (not implemented):** production configuration, Dockerfiles, HTTPS private deployment, backups, and deep health checks. A small VPS with Docker Compose remains a hosting candidate, not a final decision. ChatGPT iPhone feasibility remains a Milestone 4 gate, not a Milestone 3 completion requirement. Full design: `docs/decisions/0003-m3-auth-security-design.md`.
+**Hosting (Milestone 3.5a):** ADR 0004 selects **Render**. Target topology: public HTTPS Next.js web service → private FastAPI service on Render’s private network → managed Render Postgres (prefer internal URL + private-only ACL). Redis/RQ deferred for v0.1. Exposure model: public website + strict app auth; **do not** expose FastAPI publicly in v0.1.
+
+**Still planned (not implemented):** Dockerfiles, `render.yaml`/Blueprint, production secrets on Render, deep health/readiness, `/docs` lockdown, migrate-on-deploy hook, backup restore drill, and the live cutover (Milestone 3.5b + owner actions). ChatGPT iPhone feasibility remains a Milestone 4 gate. Full auth design: `docs/decisions/0003-m3-auth-security-design.md`. Full deploy design: `docs/decisions/0004-m3-render-deployment.md`.
 
 ## B2. ChatGPT ↔ PCC integration (Roadmap M4)
 Planned: let the standard ChatGPT app (including iPhone) save and retrieve PCC data through a supported, authenticated tool/MCP-style interface.
 - **Feasibility is unverified.** The roadmap makes it an explicit gate: confirm the supported mechanism, iPhone availability, authentication requirements, and network accessibility before building. The first goal is a capture created from the standard ChatGPT iPhone app that appears in the Inbox. It depends on Milestone 3.
 - **No code exists:** no MCP server, tool endpoints, OAuth, or ChatGPT-specific adapter.
 - PCC calling an AI provider's API is a different direction and is also not implemented.
+- **Deploy implication (ADR 0004):** v0.1 keeps FastAPI private. If Milestone 4 requires a publicly reachable tool endpoint, a later controlled authenticated surface may be needed; do not assume the private API alone satisfies ChatGPT.
 
 ## B3. Historical ChatGPT conversation ingestion (Roadmap M6)
 Planned: import a ChatGPT data export, preserve conversations with timestamps and provenance, make imports idempotent, and derive reviewable decisions, tasks and knowledge.
@@ -338,6 +342,7 @@ Planned: Redis/RQ processing of captures, an AI-provider abstraction with budget
 - ~~Which authentication approach fits a single-user deployment, and how will the Next.js server authenticate to FastAPI?~~ **Answered in ADR 0003 and implemented in M3.2–M3.4:** Google sign-in with a verified-email allowlist, Auth.js v5 database sessions in PostgreSQL, protection of pages and Server Actions, a server-side service credential for Next.js→FastAPI, and hashed scoped revocable API tokens for non-browser clients.
 - ~~How should backend CI obtain a Postgres `pcc_test` database?~~ **Answered:** a GitHub Actions Postgres service container.
 - ~~Auth.js table migration ownership?~~ **Answered in M3.3:** Alembic revision `0003_authjs_tables` in the shared PCC database.
+- ~~Which hosting target and ingress model for v0.1?~~ **Answered in ADR 0004:** Render; public HTTPS Next.js + private FastAPI + managed Postgres; Redis/worker deferred.
 - What is the intended lifecycle of capture status values (`processing`, `processed`, `failed`), and which component owns the transitions?
 - Should `projects` and `tasks` be kept, reshaped, or removed given that nothing uses them yet?
 - Does the backend need a CORS policy, or should `API_CORS_ORIGINS` / `NEXT_PUBLIC_API_BASE_URL` be removed from `.env.example`?

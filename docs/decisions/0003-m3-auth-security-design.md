@@ -1,6 +1,6 @@
 # ADR 0003 — Milestone 3.1 authentication and API security design
 
-**Status:** Accepted. Milestone 3.2 (API service credential) and Milestone 3.3 (Google/Auth.js website sessions) are implemented in code; API token issuance and private deployment remain later Milestone 3 work.
+**Status:** Accepted. Milestones 3.2–3.4 are implemented in code; hosting/ingress for private deployment is decided in ADR 0004 (Render). Remaining Milestone 3 work is M3.5b repo deploy prep and owner provisioning.
 **Date:** 2026-11-12
 
 ## Context
@@ -153,9 +153,9 @@ Additional scopes may be added later; do not invent broad `admin:*` requirements
 
 These do **not** block recording Milestone 3.1 architecture decisions, but must be resolved during Milestone 3 implementation or later gates as noted:
 
-1. Exact private deployment model for v0.1 (VPN-only/private ingress vs public HTTPS endpoint with strict auth).
+1. ~~Exact private deployment model for v0.1 (VPN-only/private ingress vs public HTTPS endpoint with strict auth).~~ **Resolved in ADR 0004:** Render; public HTTPS Next.js + private FastAPI + managed Postgres; Redis/worker deferred.
 2. Concrete operational secret-rotation cadence (beyond the emergency compromise procedure above).
-3. Whether Auth.js tables share the primary PCC schema via Alembic vs a dedicated web-side migration path.
+3. ~~Whether Auth.js tables share the primary PCC schema via Alembic vs a dedicated web-side migration path.~~ **Resolved in Milestone 3.3:** Alembic `0003_authjs_tables`.
 4. Rate-limiting thresholds and abuse controls per auth principal/token.
 5. **Milestone 4 feasibility gate** (not a Milestone 3 completion requirement) for ChatGPT:
    - Supported integration mechanism for the target account/plan.
