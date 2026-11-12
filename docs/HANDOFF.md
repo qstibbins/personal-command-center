@@ -1,65 +1,56 @@
 # Personal Command Center — Development Handoff
 
-_Last updated: 2026-11-12. Universal Capture v1 (Milestones 0–2) is complete, browser-accepted, and merged to `main` (PR #1, `636c026`). Verify against the local repository before treating any item as complete._
+_Last updated: 2026-11-12. Universal Capture v1 (Milestones 0–2) merged; Milestone 3.1 ADR accepted; Milestone 3.2 FastAPI service-credential auth merged; Milestone 3.3 Google sign-in / Auth.js database sessions implemented on `feature/m3-google-auth`. Verify against the local repository before treating any item as complete._
 
 ## Project goal
 Build PCC as a persistent personal system of record: captures, knowledge, tasks, projects, agent workflows, and outputs. Use both its own website (capture and dashboards) and, where supported, existing AI assistant apps (e.g., ChatGPT) as conversational interfaces. Preserve and eventually import useful historical ChatGPT conversations; do not assume automatic access to ChatGPT history or memory.
 
 ## Local environment
 - Repo: `/Users/quinton/Desktop/srccode/personal-command-center`
-- Branch: `main` (Universal Capture v1 merged as `636c026`; `feature/universal-capture` is the merged feature branch)
-- Stack: Next.js 15 / React 19 (`apps/web`); FastAPI / Python (`apps/api`); PostgreSQL; Redis; RQ; SQLAlchemy; Alembic; Docker Compose; pnpm; uv.
+- Branch: work happens on feature branches; `main` includes through Milestone 3.2 (`35fc6e3`). Milestone 3.3 lands via `feature/m3-google-auth`.
+- Stack: Next.js 15 / React 19 (`apps/web`); FastAPI / Python (`apps/api`); PostgreSQL; Redis; RQ; SQLAlchemy; Alembic; Docker Compose; pnpm; uv; Auth.js v5 (`next-auth` beta) + `@auth/pg-adapter`.
 - Root compose file: `compose.yaml` (not `docker-compose.yml`).
 - API routes: `GET /api/v1/health`, `POST /api/v1/captures`, `GET /api/v1/captures`.
 - Capture model: UUID ID, source_type `text|url`, optional title, content, status, timestamps.
+- Auth.js tables (Alembic `0003_authjs_tables`): `users`, `accounts`, `sessions`, `verification_token`.
 
 ## Last confirmed working
 - Backend API, capture persistence, migrations, and isolated `pcc_test` test database.
-- **Milestone 1 (capture UX) and Milestone 2 (capture validation) complete and merged to `main`** (PR #1, "feat: Universal Capture v1").
-- Automated checks at the final commit: `pnpm lint:web` (typecheck), `pnpm test:web` 27/27 (Server Action tests), `pnpm build:web`, and backend `uv run pytest` 61/61 with `TEST_DATABASE_URL` pointing at `pcc_test`.
-- Durable test guidance: API endpoint tests are intentionally isolated through `db_client` and require `TEST_DATABASE_URL` targeting `pcc_test`; without it, endpoint tests fail fast instead of falling back to any non-test database.
-- **Browser acceptance passed** in real Chrome against a dev database (full stack: Next dev, uvicorn, local Postgres):
-  - Invalid URL shows a field-level error under Content and keeps title, content and Type; correcting the URL without reselecting Type saves as `url`, appears in the Inbox, and resets the form (Type back to Text).
-  - Text capture saves; multi-line content renders in the Inbox.
-  - With FastAPI stopped, a generic error is shown ("Unable to reach the capture service. Your input was kept; try again.") and input including Type=URL is kept; after restarting FastAPI the same input saves.
-  - The success message clears as soon as the user starts a new capture.
-- Capture rules (enforced in FastAPI, the authority): title and content trimmed; URL captures accept only absolute `http`/`https` URLs with a valid host, no embedded username/password, max 2,048 chars; text max 100,000 chars; the trimmed original URL is stored (no normalization); remote content is never fetched. The Next.js Server Action maps 422s to field errors and uses generic messages for network/5xx/malformed responses.
-- A real bug found during acceptance (the Type select reset to Text after a failed submit, so a corrected URL could save as text) is fixed: the select is remounted for each action result.
+- **Milestones 0–2** complete and merged (PR #1).
+- **Milestone 3.2** FastAPI Bearer service-credential auth + scopes merged (PR #4).
+- **Milestone 3.3 (this work):** Auth.js v5 Google provider, PostgreSQL database sessions, verified-email allowlist (`PCC_ALLOWED_GOOGLE_EMAILS`, fail closed), `/signin` + sign-out (session row deleted), home page and `createCapture` Server Action gated server-side; M3.2 service credential preserved for Next.js→FastAPI.
+- Automated checks for M3.3: `pnpm lint:web`; `pnpm test:web` **50/50** (allowlist, session gate, sign-out action, Server Action auth denial + prior capture tests); `pnpm build:web`; backend `uv run pytest` **75/75** with `TEST_DATABASE_URL` → `pcc_test`; `uv run ruff check src tests`; Alembic `upgrade head` creates Auth.js tables.
+- Capture UX/validation behavior from Milestones 1–2 remains intact under an authenticated session.
 
 ## Confirmed product priority (decision, 2026-11-12)
-Universal Capture v1 is complete. The agreed sequence (details and dependencies in `docs/ROADMAP.md`):
-1. **Milestone 3 — Authentication, API security, and minimal private deployment, designed for future remote access.** (Combines the former Milestones 3 and 4.)
-2. **Milestone 4 — ChatGPT ↔ PCC integration.** First goal: create a capture from the standard ChatGPT iPhone app and see it in PCC's Inbox. **Before implementing**, verify the supported integration mechanism, mobile availability, authentication requirements, and network accessibility. Do not assume custom MCP support works in the standard iPhone client.
-3. **Milestone 5 — Task, project, and knowledge capabilities** (new milestone).
-4. **Milestone 6 — Historical conversation ingestion.** 5. **Milestone 7 — AI agent orchestration and monitoring.** (Numbers unchanged.)
-
-Dependency to keep in mind: Milestone 4 likely needs an authenticated, network-reachable endpoint, so Milestone 3 must not assume a localhost-only, browser-only client. This is unverified until the Milestone 4 feasibility gate is done.
+1. **Milestone 3** — Authentication, API security, and minimal private deployment (designed for future remote access).
+2. **Milestone 4** — ChatGPT ↔ PCC integration (feasibility gate first).
+3. **Milestone 5** — Task, project, and knowledge capabilities.
+4. **Milestone 6** — Historical conversation ingestion. 5. **Milestone 7** — AI agent orchestration and monitoring.
 
 ## Known gaps (not blockers)
-Details: Project store `docs/predeployment-stabilization-notes.md`.
-- **Resolved in PR #1:** backend Ruff errors (19), missing `pnpm test:web` CI step, missing Postgres service/`TEST_DATABASE_URL` for backend CI. CI (backend and frontend) passes. All API tests use the isolated `db_client` fixture.
-- **No component-level automated regression coverage.** Only the Server Action is unit-tested (Vitest, node environment). The Type-select reset bug, field-error rendering, and form reset-on-success are covered only by manual browser checks; adding jsdom/Testing Library or a browser test tool was deliberately deferred.
-- Multi-line text is stored with CRLF line endings (browser form normalization); not addressed.
-- Not browser-tested: the "Saving..." pending state and whitespace-only content (unit tests only).
-- Still open: `.env.example` is out of date; CI uses `pnpm install --no-frozen-lockfile`.
-- Docs reconciled 2026-11-12: `ARCHITECTURE.md` and `PROJECT.md` now use the new milestone numbering and describe the merged capture implementation. `ARCHITECTURE.md` Part C still records open items (shallow health check, untested migrations, unused `projects`/`tasks` tables, `.env.example` drift).
-- Future risk to design for if URLs are ever fetched server-side: accepted URLs include localhost/private hosts, so fetching would need SSRF controls.
+- **No component-level automated regression coverage** for the capture form (Server Action + auth helpers are unit-tested).
+- **Real Google OAuth browser acceptance** for M3.3 still required (see `docs/google-signin-local.md` checklist). Automated tests mock Auth.js / allowlist paths and cannot complete a live Google redirect without credentials.
+- Multi-line text may store CRLF from browser form normalization.
+- CI still uses `pnpm install --no-frozen-lockfile`.
+- Shallow health check; migrations not covered by automated tests (manual `alembic upgrade head` verified for `0003_authjs_tables`).
 
 ## Immediate next step
-**Milestone 3.2 (FastAPI service-credential auth) is implemented.** Capture endpoints require Bearer auth; scopes `captures:read` / `captures:write`; Next.js server calls send `PCC_SERVICE_CREDENTIAL` (see `.env.example`). Health stays open. Automated auth tests cover 401/403/success and credential non-leakage.
+**Milestone 3.3 is implemented in code** (Google/Auth.js website auth). Remaining Milestone 3 work per ADR 0003:
+1. Manual browser verification with a real Google OAuth client and allowlisted account.
+2. Scoped / revocable personal API token issuance (hashed storage, first issuance via authenticated control path).
+3. Private HTTPS v0.1 deployment (hosting choice, secrets, backups, deep health).
 
-**Next:** Milestone 3.3+ per ADR 0003 — Auth.js v5 Google sign-in with verified-email allowlist, database sessions, protect pages and Server Actions, then scoped API token issuance and private HTTPS deployment.
-
-Acceptance checks still outstanding for full Milestone 3: allowlist enforcement; database-session sign-out/revocation; API token revocation; deployment. Unresolved items remain final ingress model and Auth.js migration ownership. ChatGPT iPhone feasibility stays a Milestone 4 gate.
+ChatGPT iPhone feasibility stays a **Milestone 4** gate.
 
 ## Deployment sequence
-1. ~~Finish capture UX and tests.~~ Done (Universal Capture v1).
+1. ~~Finish capture UX and tests.~~ Done.
 2. ~~Milestone 3.1 architecture assessment.~~ Done (ADR 0003).
-3. ~~Milestone 3.2 FastAPI service-credential auth + scopes.~~ Done (this change).
-4. **Milestone 3:** Auth.js / Google website auth, API token issuance, secrets and production configuration per ADR 0003.
-5. **Milestone 3:** deploy a minimal private v0.1 (small VPS / Docker Compose candidate), HTTPS, persistent Postgres, backups, migrations, health checks; design for future remote access.
+3. ~~Milestone 3.2 FastAPI service-credential auth + scopes.~~ Done.
+4. ~~Milestone 3.3 Auth.js / Google website auth + session protection.~~ Done in code (browser OAuth acceptance pending).
+5. **Milestone 3:** API token issuance; secrets and production configuration; deploy private v0.1.
 6. Verify capture persistence, authentication (including session revocation), service restarts, and recovery.
-7. **Milestone 4:** verify then build ChatGPT↔PCC integration (first goal: capture from the standard ChatGPT iPhone app appears in the Inbox). Then task/project/knowledge capabilities (M5), historical ingestion (M6), and agent orchestration/monitoring (M7).
+7. **Milestone 4:** verify then build ChatGPT↔PCC integration.
 
 ## Integration principles
 - Calling OpenAI API from PCC is different from exposing PCC tools to the standard ChatGPT app.
@@ -80,4 +71,4 @@ Editable Hatchling install may have a `.pth` file in `apps/api/.venv/lib/python3
 - If troubleshooting becomes unrelated, record it as a separate issue and return to the milestone.
 
 ## Suggested opening message for a new chat
-"We are continuing my Personal Command Center project. Read the attached `PCC_HANDOFF.md` first. The repo is on my Mac at `/Users/quinton/Desktop/srccode/personal-command-center`. Do not assume the handoff is verified: start by checking the relevant local files or ask me for their contents. Universal Capture v1 (Milestones 0–2) is done and merged. Milestone 3.1 architecture decisions are complete in `docs/decisions/0003-m3-auth-security-design.md`; the next step is to implement Milestone 3 authentication and API protection per that ADR. ChatGPT integration (Milestone 4) comes after, and its feasibility must be verified first. Give me one precise step at a time, with working directory and expected result. Avoid unrelated environment troubleshooting. At the end, help me update the handoff and commit." 
+"We are continuing my Personal Command Center project. Read `docs/HANDOFF.md` first. Universal Capture v1 and Milestone 3.2 are on `main`. Milestone 3.3 (Google/Auth.js) is implemented — confirm the PR/`feature/m3-google-auth` state. Next: real Google OAuth browser acceptance, then API token issuance and private deployment per ADR 0003. Give me one precise step at a time."

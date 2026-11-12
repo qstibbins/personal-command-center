@@ -1,5 +1,12 @@
+import { redirect } from "next/navigation";
+
 import { apiAuthHeaders, getApiBaseUrl } from "./api";
+import { signOutAction } from "./auth-actions";
 import { CaptureForm } from "./capture-form";
+import { SignOutButton } from "./sign-out-button";
+import { getAllowlistedSession } from "../auth-session";
+
+export const dynamic = "force-dynamic";
 
 type Health = {
   status: string;
@@ -42,14 +49,23 @@ async function getCaptures(): Promise<Capture[] | null> {
 }
 
 export default async function Home() {
-  const [health, captures] = await Promise.all([
-    getHealth(),
-    getCaptures(),
-  ]);
+  const session = await getAllowlistedSession();
+  if (!session) {
+    redirect("/signin");
+  }
+
+  const [health, captures] = await Promise.all([getHealth(), getCaptures()]);
+  const email = session.user?.email ?? "signed in";
 
   return (
     <main>
-      <p className="eyebrow">PERSONAL COMMAND CENTER · V0.1</p>
+      <header className="top-bar">
+        <p className="eyebrow">PERSONAL COMMAND CENTER · V0.1</p>
+        <div className="session-meta">
+          <span className="muted">{email}</span>
+          <SignOutButton signOutAction={signOutAction} />
+        </div>
+      </header>
       <h1>From capture to action.</h1>
       <p className="intro">
         A foundation for your Second Brain, Chief of Staff,

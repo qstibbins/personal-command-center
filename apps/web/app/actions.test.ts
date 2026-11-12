@@ -3,12 +3,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
+const getAllowlistedSessionMock = vi.fn();
+vi.mock("../auth-session", () => ({
+  getAllowlistedSession: (...args: unknown[]) => getAllowlistedSessionMock(...args),
+}));
+
 import { revalidatePath } from "next/cache";
 
 import { createCapture } from "./actions";
 import { initialCaptureState } from "./capture-state";
 
 const TEST_SERVICE_CREDENTIAL = "test-web-service-credential-not-for-production";
+const ALLOWLISTED_SESSION = {
+  user: { email: "owner@example.com", name: "Owner" },
+  expires: "2099-01-01T00:00:00.000Z",
+};
 
 function makeForm(fields: Record<string, string>) {
   const formData = new FormData();
@@ -26,11 +35,13 @@ describe("createCapture", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", fetchMock);
     process.env.PCC_SERVICE_CREDENTIAL = TEST_SERVICE_CREDENTIAL;
+    getAllowlistedSessionMock.mockResolvedValue(ALLOWLISTED_SESSION);
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
     fetchMock.mockReset();
+    getAllowlistedSessionMock.mockReset();
     vi.mocked(revalidatePath).mockReset();
     delete process.env.PCC_SERVICE_CREDENTIAL;
   });
@@ -326,6 +337,35 @@ describe("createCapture", () => {
     expect(state.values.content).toBe("keep");
     expect(state.message).not.toContain("PCC_SERVICE_CREDENTIAL");
     expect(JSON.stringify(state)).not.toContain(TEST_SERVICE_CREDENTIAL);
+  });
+
+  it("rejects unauthenticated Server Action calls without contacting FastAPI", async () => {
+    getAllowlistedSessionMock.mockResolvedValue(null);
+
+    const state = await createCapture(
+      initialCaptureState,
+      makeForm({ source_type: "text", title: "T", content: "secret idea" }),
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(state.status).toBe("error");
+    expect(state.message).toBe("You must sign in to save captures.");
+    expect(state.values.content).toBe("secret idea");
+    expect(revalidatePath).not.toHaveBeenCalled();
+    expect(JSON.stringify(state)).not.toContain(TEST_SERVICE_CREDENTIAL);
+  });
+
+  it("rejects revoked or non-allowlisted sessions without contacting FastAPI", async () => {
+    getAllowlistedSessionMock.mockResolvedValue(null);
+
+    const state = await createCapture(
+      initialCaptureState,
+      makeForm({ source_type: "url", title: "", content: "https://example.com" }),
+    );
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(state.status).toBe("error");
+    expect(state.values.source_type).toBe("url");
   });
 
   // The form shows state.values.source_type after every action, so this is the

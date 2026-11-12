@@ -88,7 +88,7 @@ Delivered:
 
 ## Milestone 3 — Authentication, API security, and minimal private deployment
 
-**Status: In progress. Milestone 3.1 (ADR) complete; Milestone 3.2 (FastAPI service-credential auth + scopes) implemented on the API and Next.js server calls. Remaining: website Google/Auth.js sign-in, API token issuance, and private deployment.** This milestone combines the former Milestone 3 (authentication and production readiness) and Milestone 4 (first private deployment, v0.1).
+**Status: In progress. Milestone 3.1 (ADR) complete; Milestone 3.2 (FastAPI service-credential auth + scopes) complete; Milestone 3.3 (Auth.js v5 Google sign-in, PostgreSQL database sessions, page/Server Action protection) implemented in code — real Google OAuth browser acceptance still required. Remaining for Milestone 3: API token issuance and private deployment.** This milestone combines the former Milestone 3 (authentication and production readiness) and Milestone 4 (first private deployment, v0.1).
 
 **Design constraint: designed for future remote access.** The first deployment may be minimal and private, but it must not assume that the only client is a browser on the same machine. Choices made here should keep a later internet-reachable, HTTPS-protected endpoint possible without redesign. ChatGPT iPhone feasibility remains a **Milestone 4 gate**, not a Milestone 3 completion requirement. In particular: no hard-coded `localhost` assumptions, configurable public/internal base URLs and allowed origins, and API authentication that a non-browser client can use.
 
@@ -99,10 +99,11 @@ Delivered:
 - [ ] Inventory what production needs that does not exist yet: Dockerfiles, production config, secrets handling, deep health checks, request size limits and rate limiting, CORS/origin policy, migration procedure, backups.
 
 ### Authentication and API security
-- [x] **Milestone 3.2:** Protect capture API endpoints with FastAPI auth (`captures:read` / `captures:write`); Next.js server sends `PCC_SERVICE_CREDENTIAL` as a Bearer token (never to the browser). Health remains public. Auth module is centralized for future API tokens. Google sign-in / Auth.js and personal API token issuance are **not** done yet.
-- [ ] Protect website access (Auth.js v5 + Google allowlist) and Server Actions with sessions (ADR 0003).
-- [x] Document service-credential environment variables for local development (`.env.example`, README); keep secrets server-only.
-- [ ] Configure remaining production secrets and Auth.js / Google OAuth variables.
+- [x] **Milestone 3.2:** Protect capture API endpoints with FastAPI auth (`captures:read` / `captures:write`); Next.js server sends `PCC_SERVICE_CREDENTIAL` as a Bearer token (never to the browser). Health remains public. Auth module is centralized for future API tokens.
+- [x] **Milestone 3.3:** Protect website access (Auth.js v5 + Google verified-email allowlist + PostgreSQL database sessions) and Server Actions with server-side session checks (ADR 0003). Sign-out deletes the Auth.js `sessions` row. Local setup: `docs/google-signin-local.md`. _Browser OAuth acceptance with a real Google client still pending._
+- [x] Document service-credential and Auth.js / Google OAuth environment variables for local development (`.env.example`, README, `docs/google-signin-local.md`); keep secrets server-only.
+- [ ] Configure remaining production secrets and Auth.js / Google OAuth variables for the private deployment.
+- [ ] Personal / integration API token issuance (hashed, scoped, revocable) — still out of scope for 3.3.
 
 ### Minimal private deployment (v0.1)
 - [ ] Select hosting and configure HTTPS, domain/access, persistent PostgreSQL storage, and backups.
@@ -112,7 +113,7 @@ Delivered:
 
 **Exit criterion:** PCC is deployed at a secure private URL without exposing personal captures or unauthenticated write endpoints, the capture workflow survives a restart, and nothing in the design blocks later remote access.
 
-**Open Milestone 3 implementation dependencies (not ChatGPT iPhone feasibility):** final private ingress model (VPN/private endpoint vs public HTTPS + strict auth), Auth.js table migration ownership, and operational secret-rotation cadence. ChatGPT iPhone support, auth method, and reachability remain **Milestone 4 feasibility-gate** items and are not required to close Milestone 3.
+**Open Milestone 3 implementation dependencies (not ChatGPT iPhone feasibility):** final private ingress model (VPN/private endpoint vs public HTTPS + strict auth), and operational secret-rotation cadence. Auth.js tables are owned by Alembic revision `0003_authjs_tables` (resolved in Milestone 3.3). ChatGPT iPhone support, auth method, and reachability remain **Milestone 4 feasibility-gate** items and are not required to close Milestone 3.
 
 ## Milestone 4 — ChatGPT ↔ PCC integration
 

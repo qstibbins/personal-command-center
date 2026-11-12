@@ -15,13 +15,13 @@ Initial Next.js + FastAPI monorepo scaffold for a personal Second Brain and Chie
 Use several Terminal tabs (infrastructure/setup, API, web, and optionally the worker), starting from the repository root.
 
 1. **Infrastructure**: `cp .env.example .env` then `docker compose up -d`
-2. **Service credential**: set the same `PCC_SERVICE_CREDENTIAL` value for the API and Next.js processes (see `.env.example`). Capture create/list require it; do not use a `NEXT_PUBLIC_` prefix.
-3. **Python dependencies and migrations**: `cd apps/api && uv sync --group dev && uv run alembic upgrade head`
+2. **Secrets**: set `PCC_SERVICE_CREDENTIAL` (same value for API and Next.js), `AUTH_SECRET`, Google OAuth (`AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET`), and `PCC_ALLOWED_GOOGLE_EMAILS` (see `.env.example` and `docs/google-signin-local.md`). Never use a `NEXT_PUBLIC_` prefix for these.
+3. **Python dependencies and migrations**: `cd apps/api && uv sync --group dev && uv run alembic upgrade head` (includes Auth.js session tables)
 4. **API** (same `apps/api` directory): `uv run uvicorn pcc.main:app --reload --host 127.0.0.1 --port 8000`
-5. **Web** (repository root): `pnpm install && pnpm dev:web` (loads `PCC_SERVICE_CREDENTIAL` / `API_INTERNAL_URL` from the environment or root `.env` via your shell)
+5. **Web** (repository root): `pnpm install && pnpm dev:web` (loads auth and service env from the environment or root `.env` via your shell)
 6. **Worker** (new tab in `apps/api`): `uv run python -m pcc.worker.main`
 
-Visit http://localhost:3000 and http://localhost:8000/docs. The home page should show **FastAPI: Connected**.
+Visit http://localhost:3000 — unauthenticated visitors are sent to `/signin`. After Google sign-in with the allowlisted account, the home page shows capture, Inbox, and **FastAPI: Connected**. API docs: http://localhost:8000/docs.
 
 ### Local API authentication (Milestone 3.2)
 
@@ -32,7 +32,20 @@ Visit http://localhost:3000 and http://localhost:8000/docs. The home page should
 | `API_INTERNAL_URL` | Next.js (server-only) | FastAPI base URL (default `http://localhost:8000`) |
 | `TEST_DATABASE_URL` | Backend tests | Must target a database named `pcc_test` |
 
-`GET /api/v1/health` stays unauthenticated. `GET /api/v1/captures` requires scope `captures:read`; `POST /api/v1/captures` requires `captures:write`. The service credential grants both. Google sign-in, Auth.js, and personal API token issuance are not implemented yet (see ADR 0003).
+`GET /api/v1/health` stays unauthenticated. `GET /api/v1/captures` requires scope `captures:read`; `POST /api/v1/captures` requires `captures:write`. The service credential grants both.
+
+### Website Google sign-in (Milestone 3.3)
+
+Auth.js v5 (`next-auth` v5 beta) with `@auth/pg-adapter`, Google provider, and PostgreSQL database sessions. See `docs/google-signin-local.md` for Google Cloud callback URLs and the full checklist.
+
+| Variable | Used by | Purpose |
+|---|---|---|
+| `AUTH_SECRET` | Next.js (server-only) | Auth.js session secret |
+| `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | Next.js (server-only) | Google OAuth Web client |
+| `PCC_ALLOWED_GOOGLE_EMAILS` | Next.js (server-only) | Allowlist; missing/empty fails closed |
+| `AUTH_DATABASE_URL` | Next.js (optional) | pg URL; otherwise `DATABASE_URL` is rewritten |
+
+Local Google redirect URI: `http://localhost:3000/api/auth/callback/google`. Personal API token issuance is still not implemented (see ADR 0003).
 
 ### Test a background job
 
@@ -59,9 +72,9 @@ At the root: `pnpm lint:web && pnpm test:web && pnpm build:web`.
 
 ## What is and isn't included
 
-Included: a Universal Capture web form (text or URL, with pending, success, and error feedback) and an Inbox listing saved captures; FastAPI endpoints `GET /api/v1/health`, `POST /api/v1/captures`, and `GET /api/v1/captures`; FastAPI service-credential authentication with scopes `captures:read` / `captures:write` on capture endpoints; SQLAlchemy models and Alembic migrations (`captures`, plus unused `projects` and `tasks` tables); PostgreSQL; Redis and an RQ worker with a demo job only; backend and frontend tests; CI; and ADRs. See `docs/ARCHITECTURE.md` for details.
+Included: a Universal Capture web form (text or URL, with pending, success, and error feedback) and an Inbox listing saved captures; FastAPI endpoints `GET /api/v1/health`, `POST /api/v1/captures`, and `GET /api/v1/captures`; FastAPI service-credential authentication with scopes `captures:read` / `captures:write` on capture endpoints; Auth.js v5 Google sign-in with a verified-email allowlist and PostgreSQL database sessions protecting pages and Server Actions; SQLAlchemy models and Alembic migrations (`captures`, Auth.js session tables, plus unused `projects` and `tasks` tables); PostgreSQL; Redis and an RQ worker with a demo job only; backend and frontend tests; CI; and ADRs. See `docs/ARCHITECTURE.md` for details.
 
-Not yet included: website Google sign-in / Auth.js, personal API token issuance UI, file uploads, object storage, task and project APIs, URL remote fetching, capture processing, AI integrations, ChatGPT integration, ChatGPT history import, agents, PWA offline support, production Dockerfiles, TLS, backups, and full production hardening. **Do not expose this scaffold to the internet or upload private journal entries yet.**
+Not yet included: personal API token issuance UI, file uploads, object storage, task and project APIs, URL remote fetching, capture processing, AI integrations, ChatGPT integration, ChatGPT history import, agents, PWA offline support, production Dockerfiles, TLS, backups, and full production hardening. **Do not expose this scaffold to the internet or upload private journal entries yet.**
 
 ## Architecture
 
@@ -83,4 +96,4 @@ The database is the system of record; the worker is for slow tasks; the AI provi
 
 ## Next milestone
 
-Continue Milestone 3 per ADR 0003: website Google sign-in (Auth.js v5), protecting pages and Server Actions with sessions, then private deployment. See `docs/ROADMAP.md`.
+Continue Milestone 3 per ADR 0003: scoped API token issuance and private HTTPS deployment. See `docs/ROADMAP.md`.

@@ -1,7 +1,7 @@
 # Personal Command Center (PCC) — Architecture
 
-**Last updated:** 2026-11-12 (reconciled with `ROADMAP.md` and `HANDOFF.md` after Universal Capture v1 was merged)
-**Branch inspected:** `main` at `636c026` (Universal Capture v1, PR #1, merged)
+**Last updated:** 2026-11-12 (Milestone 3.3 Google/Auth.js website sessions)
+**Branch inspected:** `feature/m3-google-auth` (Milestone 3.3); `main` includes through Milestone 3.2 (`35fc6e3`)
 
 ## How to read this document
 
@@ -19,37 +19,41 @@ Product intent lives in `PROJECT.md`, sequencing in `ROADMAP.md`, and the next a
 
 ## A1. System summary
 
-PCC is currently a **single-user capture-and-Inbox application**. A user submits text or a URL string through a web form. It is stored in PostgreSQL and listed in an Inbox. That is the only implemented product capability.
+PCC is currently a **single-user capture-and-Inbox application**. A user signs in with an allowlisted Google account, then submits text or a URL string through a web form. It is stored in PostgreSQL and listed in an Inbox. That is the only implemented product capability.
 
-- FastAPI capture endpoints require a server-to-server service credential (`PCC_SERVICE_CREDENTIAL`) with scopes `captures:read` / `captures:write`. Website Google/Auth.js sign-in is not implemented yet; the UI is not user-authenticated.
+- Website auth: Auth.js v5 Google sign-in with a verified-email allowlist and PostgreSQL database sessions. Pages and Server Actions check the session server-side; sign-out deletes the session row.
+- FastAPI capture endpoints require a server-to-server service credential (`PCC_SERVICE_CREDENTIAL`) with scopes `captures:read` / `captures:write`.
 - No AI/LLM integration exists.
 - No code processes captures: they are stored as `pending` and never change status.
 - A Redis/RQ worker exists as infrastructure with a demo job only.
 
-The README states this is "a development foundation, not a production-ready app" and warns against exposing it to the internet. That warning is accurate.
+The README states this is "a development foundation, not a production-ready app" and warns against exposing it to the internet. That warning remains accurate until private HTTPS deployment.
 
 ## A2. Components and responsibilities
 
 ```
 Browser ──HTML/RSC/Server Action──▶ Next.js (apps/web, :3000)
-                                        │  server-side fetch (HTTP/JSON)
-                                        ▼
-                                  FastAPI (apps/api, :8000) ──SQLAlchemy/psycopg──▶ PostgreSQL 17
-                                                                                      (Docker, :5432)
- RQ worker (apps/api, separate process) ──redis-py──▶ Redis 7 (Docker, :6379)
- (worker is NOT connected to the capture flow)
+   │ Auth.js session cookie (opaque)         │  auth() + allowlist check
+   │                                         │  server-side fetch + Bearer service credential
+   └──── /api/auth/* (Auth.js) ──────────────┤
+                                             ▼
+                                       FastAPI (apps/api, :8000) ──SQLAlchemy/psycopg──▶ PostgreSQL
+ RQ worker (apps/api) ──redis-py──▶ Redis 7                                              │
+ (not connected to capture)              Auth.js tables (users/accounts/sessions/…) ─────┘
 ```
 
 | Component | Location | Responsibility (as implemented) |
 |---|---|---|
-| Web UI | `apps/web` | Next.js 15 / React 19 App Router. Single page (`/`): capture form, Inbox list, FastAPI health indicator. |
-| Server Action | `apps/web/app/actions.ts` | `createCapture` validates/trims input, POSTs JSON to FastAPI, returns a result state, and calls `revalidatePath("/")` on success. |
+| Web UI | `apps/web` | Next.js 15 / React 19 App Router. `/` (protected): capture form, Inbox, health, sign-out. `/signin`: Google sign-in. |
+| Auth.js | `apps/web/auth.ts`, `auth-allowlist.ts`, `auth-session.ts`, `app/api/auth/[...nextauth]` | Google provider, `@auth/pg-adapter` database sessions, allowlist, handlers. |
+| Server Action | `apps/web/app/actions.ts` | `createCapture` requires allowlisted session, then validates/trims, POSTs to FastAPI with service credential. |
 | Client form | `apps/web/app/capture-form.tsx` | `useActionState` form: pending ("Saving…"), success message with reset, error message with input preserved. |
 | API | `apps/api/src/pcc/main.py`, `api/captures.py` | FastAPI app exposing health and capture endpoints. |
+| API auth | `apps/api/src/pcc/auth/` | Bearer service-credential verification and `require_scopes`. |
 | Services | `apps/api/src/pcc/services/captures.py` | `create_capture` and `list_captures` against a SQLAlchemy `Session`. |
 | Schemas | `apps/api/src/pcc/schemas/capture.py` | Pydantic request/response models and validation. |
 | Persistence | `apps/api/src/pcc/db/` | SQLAlchemy 2.0 declarative models, engine, `SessionLocal`. |
-| Migrations | `apps/api/migrations/` | Alembic revisions. |
+| Migrations | `apps/api/migrations/` | Alembic revisions (including Auth.js tables). |
 | Worker | `apps/api/src/pcc/worker/` | RQ `Worker` on queue `default`; one `sample_job`; `submit_demo` enqueues it. |
 | Infrastructure | `compose.yaml` | PostgreSQL and Redis only, loopback-bound. |
 
@@ -57,14 +61,21 @@ Browser ──HTML/RSC/Server Action──▶ Next.js (apps/web, :3000)
 
 **Create capture**
 1. User submits the form in `capture-form.tsx` (client component, `useActionState`).
-2. `createCapture(prevState, formData)` runs on the Next.js server. It reads `source_type`, `title`, `content` and trims title and content (the API trims again; see Validation limits).
-3. Empty content returns an error state without calling the API. Otherwise it `POST`s `{source_type, title|null, content}` to `${API_INTERNAL_URL ?? "http://localhost:8000"}/api/v1/captures` with `Authorization: Bearer ${PCC_SERVICE_CREDENTIAL}` (server-only; never sent to the browser).
-4. FastAPI authenticates the service credential, requires `captures:write`, then validates: `CaptureCreate` trims and validates the body (422 on failure), then `create_capture` inserts a `Capture` row (status `pending`) and returns 201 with `CaptureRead`.
-5. A 422 is mapped to field-level errors (`title` / `content`) shown under the matching form field; other non-OK responses, malformed bodies, and thrown network errors return a generic error state. In every error case the user's raw input (including the selected type) is echoed back. Success returns empty values and calls `revalidatePath("/")`.
+2. `createCapture(prevState, formData)` runs on the Next.js server. It requires an allowlisted Auth.js session; otherwise it returns an error and does **not** call FastAPI.
+3. It reads `source_type`, `title`, `content` and trims title and content (the API trims again; see Validation limits).
+4. Empty content returns an error state without calling the API. Otherwise it `POST`s `{source_type, title|null, content}` to `${API_INTERNAL_URL ?? "http://localhost:8000"}/api/v1/captures` with `Authorization: Bearer ${PCC_SERVICE_CREDENTIAL}` (server-only; never sent to the browser).
+5. FastAPI authenticates the service credential, requires `captures:write`, then validates: `CaptureCreate` trims and validates the body (422 on failure), then `create_capture` inserts a `Capture` row (status `pending`) and returns 201 with `CaptureRead`.
+6. A 422 is mapped to field-level errors (`title` / `content`) shown under the matching form field; other non-OK responses, malformed bodies, and thrown network errors return a generic error state. In every error case the user's raw input (including the selected type) is echoed back. Success returns empty values and calls `revalidatePath("/")`.
 
 **Load Inbox**
-1. `page.tsx` is a server component. It calls `GET /api/v1/health` (unauthenticated) and `GET /api/v1/captures` (Bearer service credential, `captures:read`) in parallel with `cache: "no-store"`. The captures call sends no `limit`, so the API default of 50 applies.
-2. A failure of either request yields `null`, and the UI shows "Unable to load captures" / "Not reachable".
+1. `page.tsx` is a server component. It requires an allowlisted Auth.js session (`getAllowlistedSession`); otherwise it redirects to `/signin`.
+2. It calls `GET /api/v1/health` (unauthenticated) and `GET /api/v1/captures` (Bearer service credential, `captures:read`) in parallel with `cache: "no-store"`. The captures call sends no `limit`, so the API default of 50 applies.
+3. A failure of either request yields `null`, and the UI shows "Unable to load captures" / "Not reachable".
+
+**Sign-in / sign-out**
+1. `/signin` starts Google OAuth via Auth.js. The `signIn` callback requires Google `email_verified === true` and a case-insensitive match against `PCC_ALLOWED_GOOGLE_EMAILS` (fail closed if missing).
+2. Successful sign-in creates a row in `sessions` and sets an HTTP-only cookie with the opaque session token.
+3. Sign-out calls Auth.js `signOut`, which deletes the `sessions` row and clears the cookie.
 
 The browser never talks to FastAPI directly. All API calls originate from the Next.js server. The service credential must not use a `NEXT_PUBLIC_` prefix. This is why CORS is not currently needed.
 
@@ -78,9 +89,9 @@ The browser never talks to FastAPI directly. All API calls originate from the Ne
 
 FastAPI also serves its automatic OpenAPI docs (`/docs`, `/openapi.json`) because no override exists. Calling protected endpoints from `/docs` requires a Bearer token.
 
-**Auth (Milestone 3.2):** `pcc.auth` verifies `Authorization: Bearer` against `PCC_SERVICE_CREDENTIAL` (and optional `PCC_SERVICE_CREDENTIAL_PREVIOUS` for rotation). The service principal receives both capture scopes. `require_scopes(...)` is the reusable authorization dependency for future API tokens. Website Auth.js / Google sign-in and personal API token issuance are not implemented.
+**Auth (Milestone 3.2 + 3.3):** FastAPI `pcc.auth` verifies `Authorization: Bearer` against `PCC_SERVICE_CREDENTIAL` (and optional `PCC_SERVICE_CREDENTIAL_PREVIOUS` for rotation). The service principal receives both capture scopes. Website Auth.js v5 Google sign-in with PostgreSQL database sessions and a verified-email allowlist protects pages and Server Actions. `require_scopes(...)` remains the reusable API authorization dependency for future personal API tokens.
 
-**Not implemented:** get-by-id, update, delete, search, pagination beyond `limit`, task or project endpoints, user sign-in, API token CRUD.
+**Not implemented:** get-by-id, update, delete, search, pagination beyond `limit`, task or project endpoints, personal API token CRUD.
 
 **Validation rules (`schemas/capture.py`, enforced by FastAPI):**
 - `title` and `content` have leading/trailing whitespace trimmed; internal whitespace and line breaks are preserved. A blank title becomes `null`; blank content is rejected. Title max is 300 characters.
@@ -91,9 +102,9 @@ FastAPI also serves its automatic OpenAPI docs (`/docs`, `/openapi.json`) becaus
 
 ## A4. Data model (verified from `db/models.py` and migrations)
 
-Three tables exist, created by two Alembic revisions (`0001_initial` then `09d577e3aed4`).
+Application and Auth.js tables exist, created by Alembic revisions `0001_initial`, `09d577e3aed4` (captures), and `0003_authjs_tables` (Auth.js).
 
-**`captures`** (the only table used by any code path)
+**`captures`** (product data; Auth.js uses separate session tables below)
 
 | Column | Type | Notes |
 |---|---|---|
@@ -109,7 +120,9 @@ Only `pending` is ever written. `processing`, `processed` and `failed` are permi
 
 **`projects`** (`id`, `name`, `description`, `created_at`) and **`tasks`** (`id`, `project_id` FK, `title`, `status`, `created_at`) exist as models and tables from the scaffold migration. **No API, service, schema, UI, or test uses them.**
 
-**Not present:** tables for conversations, messages, knowledge, threads/workstreams, agents, runs, integrations, users, or sessions.
+**Auth.js tables** (`users`, `accounts`, `sessions`, `verification_token`): owned by Alembic `0003_authjs_tables` to match `@auth/pg-adapter`. No SQLAlchemy models; the Next.js adapter talks to PostgreSQL via `pg`. `sessions.sessionToken` is unique; deleting a session row revokes that browser session.
+
+**Not present:** tables for conversations, messages, knowledge, threads/workstreams, agents, runs, or integration API tokens.
 
 ## A5. Backend structure and conventions
 
@@ -136,20 +149,25 @@ The layering is route → service → SQLAlchemy model, with Pydantic schemas at
 
 ```
 apps/web/
-  package.json            # next ^15.3, react ^19, vitest ^3.1, typescript ^5.8
-  tsconfig.json
+  package.json            # next ^15.3, react ^19, next-auth@5 beta, @auth/pg-adapter, pg, vitest
+  auth.ts                 # NextAuth config (Google + PostgresAdapter, database sessions)
+  auth-allowlist.ts       # PCC_ALLOWED_GOOGLE_EMAILS parsing / Google sign-in gate
+  auth-session.ts         # getAllowlistedSession for pages and Server Actions
+  auth-db.ts              # pg Pool + DATABASE_URL rewriting
   app/
     layout.tsx            # root layout, metadata, imports styles.css
-    page.tsx              # server component: health + Inbox + <CaptureForm/>
+    page.tsx              # protected: health + Inbox + <CaptureForm/> + sign-out
+    signin/page.tsx       # Google sign-in
+    api/auth/[...nextauth]/route.ts
     api.ts                # server-only API base URL + Bearer credential headers
     capture-form.tsx      # "use client" form (useActionState)
     capture-state.ts      # CaptureFormState type + initialCaptureState
-    actions.ts            # "use server" createCapture
-    actions.test.ts       # Vitest tests of createCapture (includes auth header checks)
+    actions.ts            # "use server" createCapture (session-gated)
+    auth-actions.ts       # signOutAction
     styles.css            # global CSS (no CSS framework)
 ```
 
-State types live in `capture-state.ts` because a `"use server"` module may only export async functions. `Capture` and `Health` types in `page.tsx` are hand-written, not generated.
+State types live in `capture-state.ts` because a `"use server"` module may only export async functions. `Capture` and `Health` types in `page.tsx` are hand-written, not generated. Authorization is enforced in page/Server Action code on the Node runtime; Edge middleware is not used for session checks.
 
 ## A7. Infrastructure and configuration
 
@@ -159,17 +177,21 @@ State types live in `capture-state.ts` because a `"use server"` module may only 
 
 | Variable | Used by code? | Notes |
 |---|---|---|
-| `DATABASE_URL` | Yes (`core/config.py`, Alembic) | |
+| `DATABASE_URL` | Yes (`core/config.py`, Alembic; Auth.js via rewrite) | |
+| `AUTH_DATABASE_URL` | Yes (optional; Next.js `auth-db.ts`) | Preferred pg URL for Auth.js when set. |
 | `REDIS_URL` | Yes (worker) | |
 | `POSTGRES_USER/PASSWORD/DB` | Yes (Compose) | Defaults in `compose.yaml` |
 | `PCC_SERVICE_CREDENTIAL` | Yes (FastAPI `core/config.py`; Next.js `app/api.ts`) | Server-only shared secret for capture endpoints. |
 | `PCC_SERVICE_CREDENTIAL_PREVIOUS` | Yes (FastAPI) | Optional dual-read during rotation. |
 | `API_INTERNAL_URL` | Yes (`app/api.ts`) | Defaults to `http://localhost:8000`. |
+| `AUTH_SECRET` | Yes (Auth.js) | Session signing/encryption secret. |
+| `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` | Yes (Auth.js Google provider) | OAuth Web client credentials. |
+| `PCC_ALLOWED_GOOGLE_EMAILS` | Yes (`auth-allowlist.ts`) | Comma-separated; missing/empty fails closed. |
 | `TEST_DATABASE_URL` | Yes (`tests/conftest.py`) | Must point at a database named `pcc_test`. |
 | `API_CORS_ORIGINS` | **No** | Commented in `.env.example`; no CORS middleware exists. |
 | `NEXT_PUBLIC_API_BASE_URL` | **No** | Commented in `.env.example`; not referenced by web code. |
 
-Secrets: only a local development password default exists. `.env` files are gitignored.
+Secrets stay server-only (never `NEXT_PUBLIC_`). `.env` files are gitignored. Local Google setup: `docs/google-signin-local.md`.
 
 ## A8. Development and test commands
 
@@ -193,11 +215,11 @@ Prerequisites per README: Docker, Node 22, pnpm 10.11.0, Python 3.12+, `uv`.
 
 **Backend test design:** all API endpoint tests in `test_captures.py` and `test_capture_validation.py` run through the `db_client` fixture. It refuses to run unless `TEST_DATABASE_URL` is set and the database name is exactly `pcc_test`. An autouse override blocks unisolated `get_db` usage so tests cannot accidentally hit development/production databases. The fixture runs `Base.metadata.create_all` and `drop_all` around each test and overrides `get_db`. The tests therefore build schema from the models and **do not exercise the Alembic migrations**. CI provisions `pcc_test` through a Postgres service container; locally it must be created manually.
 
-**Frontend test design:** only the Server Action is tested (success and reset, 422 field-error mapping, generic fallbacks for malformed bodies, 5xx and network failures, blank content, and the `source_type` returned to the form). `fetch` and `next/cache` are mocked in Vitest's default Node environment. There are no component tests, browser tests, or Vitest config file.
+**Frontend test design:** Server Action tests (including session-gate denial and service-credential headers), plus unit tests for allowlist parsing, Auth.js session gating, sign-out action, and database URL rewriting. `fetch`, `next/cache`, and Auth.js session helpers are mocked in Vitest's Node environment. There are no component tests, browser tests, or Vitest config file. Live Google OAuth is not automated.
 
 **CI (`.github/workflows/ci.yml`)** runs on every push and PR:
 - Backend job: `uv sync`, `uv run pytest`, `uv run ruff check`.
-- Frontend job: `pnpm install --no-frozen-lockfile`, `pnpm lint:web`, `pnpm test:web`, `pnpm build:web`.
+- Frontend job: `pnpm install --no-frozen-lockfile`, `pnpm lint:web`, `pnpm test:web`, `pnpm build:web` (placeholder Auth.js env vars for build only).
 - See Part C for remaining gaps (for example migration coverage and local `pcc_test` setup).
 
 ## A9. Verified architectural decisions
@@ -210,17 +232,18 @@ Prerequisites per README: Docker, Node 22, pnpm 10.11.0, Python 3.12+, `uv`.
 | Keep the existing Server Action + FastAPI architecture for capture UX | Implemented and merged to `main` (PR #1). |
 | `packages/api-client` reserved for OpenAPI-generated client | **Placeholder only** (a README). The web app hand-writes its types. |
 | Tests protect real data via `pcc_test` guard | Implemented in `conftest.py`. |
+| **ADR 0003** Google/Auth.js database sessions + FastAPI service credential | Milestone 3.2 + 3.3 implemented in code; API tokens and private deploy remain. |
 
 ## A10. Verification status
 
 | Item | Status |
 |---|---|
-| Source, config, migrations, tests, CI and Compose were read for this document | Done (original review 2026-11-09; capture sections updated 2026-11-12) |
-| Frontend `pnpm lint:web`, `pnpm test:web` (27 Server Action tests), `pnpm build:web` | Passed locally and in GitHub Actions on PR #1 |
-| Backend `uv run pytest` (61 tests, using `pcc_test` Postgres) and `ruff check src tests` | Passed locally and in GitHub Actions on PR #1 (CI provisions Postgres 17 as a service container) |
-| Alembic migrations, Docker Compose services | **Still not exercised by any test.** Migrations were applied by hand to a local dev database during browser testing only. |
-| Browser acceptance of the capture form | **Performed 2026-11-12** in real Chrome against the full stack (invalid URL field error, correction without reselecting Type, text capture, backend-down generic error with input kept, success reset). Evidence is in the Project store `media/`. The "Saving…" pending state and whitespace-only submit were not observed in the browser. |
-| Uncommitted state | None. Capture work and the docs are committed; Universal Capture v1 is merged to `main`. |
+| Source, config, migrations, tests, CI and Compose were read for this document | Done (updated for M3.3 on 2026-11-12) |
+| Frontend `pnpm lint:web`, `pnpm test:web` (50 tests), `pnpm build:web` | Passed locally for Milestone 3.3 |
+| Backend `uv run pytest` (75 tests, `pcc_test`) and `ruff check src tests` | Passed locally for Milestone 3.3 |
+| Alembic `0003_authjs_tables` | Applied manually to local Postgres (`alembic upgrade head`); not covered by automated tests |
+| Browser acceptance of the capture form | **Performed 2026-11-12** (pre-auth). M3.3 Google OAuth browser acceptance still required (see `docs/google-signin-local.md`) |
+| Client bundle secret leakage check | No `AUTH_*` / service credential values found under `.next/static` after production build |
 
 ---
 
@@ -229,9 +252,9 @@ Prerequisites per README: Docker, Node 22, pnpm 10.11.0, Python 3.12+, `uv`.
 Everything below comes from `PROJECT.md`, `ROADMAP.md`, `HANDOFF.md`, and the ADRs unless a subsection notes partial delivery already reflected in Part A. Treat unmarked items as intent that may change.
 
 ## B1. Authentication, API security, and minimal private deployment (Roadmap M3)
-**Partial delivery:** Milestone 3.1 (ADR 0003) is accepted. **Milestone 3.2 is implemented** in Part A: FastAPI capture endpoints enforce Bearer authentication with scopes `captures:read` / `captures:write`, and the Next.js server calls FastAPI with the server-only `PCC_SERVICE_CREDENTIAL` (optional previous credential for rotation). Health remains unauthenticated.
+**Partial delivery:** Milestone 3.1 (ADR 0003) is accepted. **Milestone 3.2** (FastAPI service credential + scopes) and **Milestone 3.3** (Auth.js Google sign-in, PostgreSQL database sessions, page/Server Action protection) are implemented in Part A. Health remains unauthenticated at the API. Real Google OAuth browser acceptance for 3.3 may still be pending after merge.
 
-**Still planned (not implemented):** Google sign-in / Auth.js v5 browser authentication (verified-email allowlist, PostgreSQL database sessions, protection of pages and Server Actions); external/personal API token issuance, storage (hashed), and revocation UI; production configuration, Dockerfiles, HTTPS private deployment, backups, and deep health checks. A small VPS with Docker Compose remains a hosting candidate, not a final decision. ChatGPT iPhone feasibility remains a Milestone 4 gate, not a Milestone 3 completion requirement. Full design: `docs/decisions/0003-m3-auth-security-design.md`.
+**Still planned (not implemented):** external/personal API token issuance, storage (hashed), and revocation UI; production configuration, Dockerfiles, HTTPS private deployment, backups, and deep health checks. A small VPS with Docker Compose remains a hosting candidate, not a final decision. ChatGPT iPhone feasibility remains a Milestone 4 gate, not a Milestone 3 completion requirement. Full design: `docs/decisions/0003-m3-auth-security-design.md`.
 
 ## B2. ChatGPT ↔ PCC integration (Roadmap M4)
 Planned: let the standard ChatGPT app (including iPhone) save and retrieve PCC data through a supported, authenticated tool/MCP-style interface.
@@ -268,7 +291,7 @@ Planned: Redis/RQ processing of captures, an AI-provider abstraction with budget
 | 4 | `README.md`: "Open **four** Terminal tabs" | **Resolved 2026-11-09:** wording changed to "several" tabs. |
 | 5 | `ADR 0001`: "Organize backend code by business capability" | Backend is organized **by layer** (`api/`, `schemas/`, `services/`, `db/`). With one domain this is fine, but it differs from the stated intent. |
 | 6 | `ADR 0002`: storage abstraction and local-disk uploads | Not implemented (ADR is "Proposed"). `README.md` correctly lists uploads as not included. |
-| 7 | `.env.example` documents `API_CORS_ORIGINS` and `NEXT_PUBLIC_API_BASE_URL` | Neither is read by any code. The code uses `API_INTERNAL_URL` and `TEST_DATABASE_URL`, which `.env.example` omits. |
+| 7 | `.env.example` previously omitted runtime vars | **Resolved for M3.2/3.3:** documents `API_INTERNAL_URL`, `TEST_DATABASE_URL`, service credential, and Auth.js/Google vars. Unused `API_CORS_ORIGINS` / `NEXT_PUBLIC_API_BASE_URL` remain commented. |
 | 8 | `PROJECT.md` §6 listed the capture form as reported/not inspected | **Resolved 2026-11-12:** `PROJECT.md` §6 updated; the form passed browser acceptance and is merged. |
 | 9 | `ROADMAP.md` M1: "Address generated `tsconfig.tsbuildinfo` ignore rule" | **Resolved:** `.gitignore` contains `*.tsbuildinfo`, and `ROADMAP.md` M1 marks it done. |
 | 10 | `PROJECT.md` says agent/thread/run models are future requirements | Correct. However, `projects` and `tasks` tables **do** exist (migration `0001_initial`) with no API or UI. No doc describes this. |
@@ -291,8 +314,9 @@ Planned: Redis/RQ processing of captures, an AI-provider abstraction with budget
 - Does the standard ChatGPT app (especially on iPhone) support a custom tool/MCP integration for this account, and with what authentication? (Roadmap M4 feasibility gate; `PROJECT.md` open question.)
 - What ChatGPT export format and metadata will actually be importable, and does it include memory? No real export has been inspected.
 - ~~Should URL captures be fetched or enriched, and what schemes are accepted?~~ **Answered in Roadmap M2:** only absolute `http`/`https` URLs are accepted and stored as the trimmed original string; remote content is not fetched. If server-side fetching is ever added, it needs SSRF controls (accepted URLs may point at localhost or private hosts).
-- ~~Which authentication approach fits a single-user deployment, and how will the Next.js server authenticate to FastAPI?~~ **Answered in ADR 0003:** Google sign-in with a verified-email allowlist, Auth.js v5 database sessions in PostgreSQL, protection of pages and Server Actions, a server-side service credential for Next.js→FastAPI, and scoped/revocable API tokens (`captures:read`, `captures:write`) for non-browser clients.
+- ~~Which authentication approach fits a single-user deployment, and how will the Next.js server authenticate to FastAPI?~~ **Answered in ADR 0003 and implemented in M3.2/M3.3:** Google sign-in with a verified-email allowlist, Auth.js v5 database sessions in PostgreSQL, protection of pages and Server Actions, a server-side service credential for Next.js→FastAPI. Scoped/revocable personal API tokens remain future Milestone 3 work.
 - ~~How should backend CI obtain a Postgres `pcc_test` database?~~ **Answered:** a GitHub Actions Postgres service container.
+- ~~Auth.js table migration ownership?~~ **Answered in M3.3:** Alembic revision `0003_authjs_tables` in the shared PCC database.
 - What is the intended lifecycle of capture status values (`processing`, `processed`, `failed`), and which component owns the transitions?
 - Should `projects` and `tasks` be kept, reshaped, or removed given that nothing uses them yet?
 - Does the backend need a CORS policy, or should `API_CORS_ORIGINS` / `NEXT_PUBLIC_API_BASE_URL` be removed from `.env.example`?

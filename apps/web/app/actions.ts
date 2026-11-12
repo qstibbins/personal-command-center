@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
+import { getAllowlistedSession } from "../auth-session";
 import { apiAuthHeaders, getApiBaseUrl } from "./api";
 import {
   initialCaptureState,
@@ -58,6 +59,16 @@ export async function createCapture(
 
   // Echo the user's raw input back on failure so the form keeps it.
   const submitted = { source_type, title: rawTitle, content: rawContent };
+
+  // Server-side session check (ADR 0003). Do not rely on page redirects alone.
+  const session = await getAllowlistedSession();
+  if (!session) {
+    return {
+      status: "error",
+      message: "You must sign in to save captures.",
+      values: submitted,
+    };
+  }
 
   if (!content) {
     return {

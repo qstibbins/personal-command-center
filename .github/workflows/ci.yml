@@ -34,6 +34,14 @@ jobs:
         working-directory: apps/api
   frontend:
     runs-on: ubuntu-latest
+    env:
+      # Placeholders so next build can compile Auth.js config without real secrets.
+      AUTH_SECRET: ci-only-not-a-real-secret
+      AUTH_GOOGLE_ID: ci-placeholder-client-id
+      AUTH_GOOGLE_SECRET: ci-placeholder-client-secret
+      PCC_ALLOWED_GOOGLE_EMAILS: ci@example.com
+      PCC_SERVICE_CREDENTIAL: ci-only-service-credential
+      DATABASE_URL: postgresql://pcc:pcc_ci_only@localhost:5432/pcc
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

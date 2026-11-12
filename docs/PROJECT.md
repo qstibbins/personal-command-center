@@ -88,13 +88,15 @@ These are illustrative domains, not a commitment to implement every integration 
 
 ## 6. What exists today
 
-As of 2026-11-12 (Universal Capture v1, merged to `main` as PR #1):
+As of 2026-11-12 (Universal Capture v1 on `main`; Milestone 3.2 API auth on `main`; Milestone 3.3 Google/Auth.js on the M3.3 feature branch):
 - Next.js / React web application and FastAPI backend with PostgreSQL persistence.
 - Text and URL capture through the website, with an Inbox listing captures. The form shows pending, success, and error states, field-level validation errors, and resets only on success. FastAPI validates and trims input; URL captures accept only absolute `http`/`https` URLs, and remote content is not fetched.
-- Automated tests: 27 frontend Server Action tests and 61 backend tests (Postgres `pcc_test`), run in CI. There are no component-level frontend tests.
-- The capture form passed browser acceptance in real Chrome on 2026-11-12.
-- No authentication exists yet: neither the website nor the API is protected, so PCC is not safe to expose beyond a local machine.
+- FastAPI capture endpoints require a server-only service credential with scopes `captures:read` / `captures:write`. Health stays public.
+- Website Google sign-in (Auth.js v5, PostgreSQL database sessions, verified-email allowlist) protects pages and Server Actions when M3.3 is present; real Google OAuth browser acceptance may still be pending after merge.
+- Automated tests cover capture flows, API auth, and Auth.js allowlist/session gates (see `docs/HANDOFF.md` for current counts). There are no component-level frontend tests.
+- The capture form passed browser acceptance in real Chrome on 2026-11-12 (pre-auth).
 - Redis/RQ infrastructure exists, but AI processing and agent orchestration are not yet implemented.
+- PCC is still not production-hardened (no private HTTPS deployment yet).
 
 The repository, test runs, and browser checks remain the authoritative implementation evidence. `docs/ROADMAP.md` has the current sequence and `docs/HANDOFF.md` the next action.
 
