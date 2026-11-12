@@ -46,16 +46,17 @@ Details: Project store `docs/predeployment-stabilization-notes.md`.
 - Future risk to design for if URLs are ever fetched server-side: accepted URLs include localhost/private hosts, so fetching would need SSRF controls.
 
 ## Immediate next step
-**Milestone 3.1 architecture decisions are now documented** in `docs/decisions/0003-m3-auth-security-design.md` (Google sign-in with explicit allowlist, Auth.js preferred, FastAPI-enforced API auth, server-side service credential for Next.js→FastAPI, scoped revocable API tokens, private HTTPS-first deployment baseline).  
+**Milestone 3.1 architecture planning is complete.** Implement Milestone 3 authentication and API protection according to `docs/decisions/0003-m3-auth-security-design.md` (Google sign-in with verified-email allowlist, Auth.js v5 + PostgreSQL database sessions, pages and Server Actions protected, FastAPI-enforced scopes `captures:read`/`captures:write`, server-side Next.js→FastAPI service credential with rotation procedure, scoped revocable API tokens, private HTTPS-first deployment).
 
-Next step: implement Milestone 3 authentication and API protection according to ADR 0003, then verify with acceptance checks (allowlist enforcement, secure sessions, unauthorized API denial, service-credential enforcement, scoped token revocation behavior). Keep unresolved dependencies explicit while implementing: final ingress model choice and Milestone 4 ChatGPT feasibility-gate findings.
+Acceptance checks to run after implementation: allowlist enforcement; database-session sign-out/revocation blocks protected pages and Server Actions; unauthorized API denial; service-credential enforcement after rotation; scoped token revocation. Unresolved Milestone 3 implementation items remain final ingress model and Auth.js migration ownership. ChatGPT iPhone feasibility stays a Milestone 4 gate.
 
 ## Deployment sequence
 1. ~~Finish capture UX and tests.~~ Done (Universal Capture v1).
-2. **Milestone 3:** architecture assessment, then authentication and API protection, secrets and production configuration.
-3. **Milestone 3:** deploy a minimal private v0.1 (small VPS / Docker Compose candidate), HTTPS, persistent Postgres, backups, migrations, health checks; design for future remote access.
-4. Verify capture persistence, authentication, service restarts, and recovery.
-5. **Milestone 4:** verify then build ChatGPT↔PCC integration (first goal: capture from the standard ChatGPT iPhone app appears in the Inbox). Then task/project/knowledge capabilities (M5), historical ingestion (M6), and agent orchestration/monitoring (M7).
+2. ~~Milestone 3.1 architecture assessment.~~ Done (ADR 0003).
+3. **Milestone 3:** implement authentication and API protection, secrets and production configuration per ADR 0003.
+4. **Milestone 3:** deploy a minimal private v0.1 (small VPS / Docker Compose candidate), HTTPS, persistent Postgres, backups, migrations, health checks; design for future remote access.
+5. Verify capture persistence, authentication (including session revocation), service restarts, and recovery.
+6. **Milestone 4:** verify then build ChatGPT↔PCC integration (first goal: capture from the standard ChatGPT iPhone app appears in the Inbox). Then task/project/knowledge capabilities (M5), historical ingestion (M6), and agent orchestration/monitoring (M7).
 
 ## Integration principles
 - Calling OpenAI API from PCC is different from exposing PCC tools to the standard ChatGPT app.
@@ -76,4 +77,4 @@ Editable Hatchling install may have a `.pth` file in `apps/api/.venv/lib/python3
 - If troubleshooting becomes unrelated, record it as a separate issue and return to the milestone.
 
 ## Suggested opening message for a new chat
-"We are continuing my Personal Command Center project. Read the attached `PCC_HANDOFF.md` first. The repo is on my Mac at `/Users/quinton/Desktop/srccode/personal-command-center`. Do not assume the handoff is verified: start by checking the relevant local files or ask me for their contents. Universal Capture v1 (Milestones 0–2) is done and merged. The confirmed next step is to finish the Milestone 3 architecture assessment (authentication, API security, minimal private deployment designed for future remote access); ChatGPT integration (Milestone 4) comes after, and its feasibility must be verified first. Give me one precise step at a time, with working directory and expected result. Avoid unrelated environment troubleshooting. At the end, help me update the handoff and commit." 
+"We are continuing my Personal Command Center project. Read the attached `PCC_HANDOFF.md` first. The repo is on my Mac at `/Users/quinton/Desktop/srccode/personal-command-center`. Do not assume the handoff is verified: start by checking the relevant local files or ask me for their contents. Universal Capture v1 (Milestones 0–2) is done and merged. Milestone 3.1 architecture decisions are complete in `docs/decisions/0003-m3-auth-security-design.md`; the next step is to implement Milestone 3 authentication and API protection per that ADR. ChatGPT integration (Milestone 4) comes after, and its feasibility must be verified first. Give me one precise step at a time, with working directory and expected result. Avoid unrelated environment troubleshooting. At the end, help me update the handoff and commit." 
