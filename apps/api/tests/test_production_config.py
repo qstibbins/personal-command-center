@@ -99,3 +99,11 @@ def test_is_production_property(monkeypatch):
     assert get_settings().is_production is True
     assert get_settings().expose_api_docs is False
     get_settings.cache_clear()
+
+
+def test_production_docs_and_redoc_stay_disabled_together(monkeypatch):
+    """Fail-closed OpenAPI surface: all three doc URLs off in production."""
+    application = _app_with_env(monkeypatch, PCC_ENV="production")
+    client = TestClient(application)
+    for path in ("/docs", "/redoc", "/openapi.json"):
+        assert client.get(path).status_code == 404

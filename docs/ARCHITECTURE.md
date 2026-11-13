@@ -1,7 +1,7 @@
 # Personal Command Center (PCC) — Architecture
 
-**Last updated:** 2026-11-12 (Milestone 3.5b Render deployment prep)
-**Branch inspected:** `feat/m3-render-deployment-prep` (on `main` through Milestone 3.5a / PR #7)
+**Last updated:** 2026-11-13 (Milestone 3.5b.1 production predeployment verification)
+**Branch inspected:** `main` through Milestone 3.5b (PR #8 / `7346091`); M3.5b.1 on `test/m3-production-verification`
 
 ## How to read this document
 
@@ -194,7 +194,7 @@ State types live in `capture-state.ts` / `api-tokens-state.ts` because a `"use s
 
 ## A7. Infrastructure and configuration
 
-**`compose.yaml`** defines `postgres:17-alpine` (volume `postgres_data`, healthcheck) and `redis:7-alpine` (healthcheck, no volume). Both bind to `127.0.0.1`. The API, web app and worker are **not** containerized, and there are no Dockerfiles. The only database created is `pcc`.
+**`compose.yaml`** defines `postgres:17-alpine` (volume `postgres_data`, healthcheck) and `redis:7-alpine` (healthcheck, no volume). Both bind to `127.0.0.1` for **local/dev** only. Production Dockerfiles exist at `apps/web/Dockerfile` and `apps/api/Dockerfile` (Render Blueprint / M3.5b); CI builds and smoke-tests them in `.github/workflows/production-verification.yml` (M3.5b.1) without pushing images. Local Compose still does not run the API/web/worker containers. The only Compose database created is `pcc`.
 
 **Environment variables**
 
@@ -259,16 +259,17 @@ Prerequisites per README: Docker, Node 22, pnpm 10.11.0, Python 3.12+, `uv`.
 | `packages/api-client` reserved for OpenAPI-generated client | **Placeholder only** (a README). The web app hand-writes its types. |
 | Tests protect real data via `pcc_test` guard | Implemented in `conftest.py`. |
 | **ADR 0003** Google/Auth.js database sessions + FastAPI service credential + scoped API tokens | Milestones 3.2–3.4 implemented in code; private deploy remains. |
-| **ADR 0004** Render hosting: public Next.js, private FastAPI, managed Postgres | Design accepted. M3.5b adds Dockerfiles + `render.yaml` + hardening. Live Render resources: owner only. Redis/worker deferred. |
+| **ADR 0004** Render hosting: public Next.js, private FastAPI, managed Postgres | Design accepted. M3.5b adds Dockerfiles + `render.yaml` + hardening. M3.5b.1 verifies images/migrate/smoke in CI. Live Render resources: owner only (M3.5c). Redis/worker deferred. |
 
 ## A10. Verification status
 
 | Item | Status |
 |---|---|
-| Source, config, migrations, tests, CI and Compose were read for this document | Done (updated for M3.3 on 2026-11-12) |
-| Frontend `pnpm lint:web`, `pnpm test:web` (50 tests), `pnpm build:web` | Passed locally for Milestone 3.3 |
-| Backend `uv run pytest` (75 tests, `pcc_test`) and `ruff check src tests` | Passed locally for Milestone 3.3 |
-| Alembic `0003_authjs_tables` | Applied manually to local Postgres (`alembic upgrade head`); not covered by automated tests |
+| Source, config, migrations, tests, CI and Compose were read for this document | Done (updated for M3.5b.1 on 2026-11-13) |
+| Frontend `pnpm lint:web`, `pnpm test:web`, `pnpm build:web` | Covered by `.github/workflows/ci.yml` |
+| Backend `uv run pytest` (`pcc_test`) and `ruff check src tests` | Covered by `.github/workflows/ci.yml` |
+| Alembic through `0004_api_tokens` (Auth.js + `api_tokens`) | Exercised in M3.5b.1 production-verification workflow against disposable Postgres 16 |
+| Production Docker image build + container smoke | `.github/workflows/production-verification.yml` (no image push; no Render) |
 | Browser acceptance of the capture form | **Performed 2026-11-12** (pre-auth). M3.3 Google OAuth browser acceptance still required (see `docs/google-signin-local.md`) |
 | Client bundle secret leakage check | No `AUTH_*` / service credential values found under `.next/static` after production build |
 
@@ -281,9 +282,9 @@ Everything below comes from `PROJECT.md`, `ROADMAP.md`, `HANDOFF.md`, and the AD
 ## B1. Authentication, API security, and minimal private deployment (Roadmap M3)
 **Partial delivery:** Milestone 3.1 (ADR 0003) is accepted. **Milestones 3.2–3.4** are implemented in Part A: FastAPI service credential + scopes; Auth.js Google sign-in with PostgreSQL database sessions; hashed scoped revocable API tokens with owner-only management UI. Health remains unauthenticated at the API. Real Google OAuth browser acceptance for 3.3 may still be pending after merge.
 
-**Hosting (Milestones 3.5a–3.5b):** ADR 0004 selects **Render**. Repo prep includes Dockerfiles, `render.yaml` (public web + private API + Postgres; no Redis), `/api/v1/ready`, production docs lockdown, Auth.js `AUTH_URL`/secure cookies, and `docs/deploy/*` runbooks. Exposure model: public website + strict app auth; **do not** expose FastAPI publicly in v0.1.
+**Hosting (Milestones 3.5a–3.5b.1):** ADR 0004 selects **Render**. Repo prep includes Dockerfiles, `render.yaml` (public web + private API + Postgres; no Redis), `/api/v1/ready`, production docs lockdown, Auth.js `AUTH_URL`/secure cookies, and `docs/deploy/*` runbooks. M3.5b.1 adds CI production image builds and disposable container migrate/smoke/negative checks (no registry push, no live secrets). Exposure model: public website + strict app auth; **do not** expose FastAPI publicly in v0.1.
 
-**Still planned (not implemented in repo / blocked on owner):** applying the Blueprint, production secrets on Render, live TLS domain, Google production OAuth URIs, backup restore drill, and cutover acceptance. ChatGPT iPhone feasibility remains a Milestone 4 gate. Full auth design: `docs/decisions/0003-m3-auth-security-design.md`. Full deploy design: `docs/decisions/0004-m3-render-deployment.md`.
+**Still planned (Milestone 3.5c — owner):** applying the Blueprint, production secrets on Render, live TLS domain, Google production OAuth URIs, backup restore drill, and cutover acceptance. ChatGPT iPhone feasibility remains a Milestone 4 gate. Full auth design: `docs/decisions/0003-m3-auth-security-design.md`. Full deploy design: `docs/decisions/0004-m3-render-deployment.md`.
 
 ## B2. ChatGPT ↔ PCC integration (Roadmap M4)
 Planned: let the standard ChatGPT app (including iPhone) save and retrieve PCC data through a supported, authenticated tool/MCP-style interface.
@@ -333,7 +334,7 @@ Planned: Redis/RQ processing of captures, an AI-provider abstraction with budget
 2. **CI skipped frontend tests (resolved).** The frontend job now runs `test:web` between `lint:web` and `build:web`.
 3. **`make test` fails without `TEST_DATABASE_URL`** for the same reason as (1).
 4. **Local `pcc_test` is still not created by repo tooling.** Compose creates only `pcc`, so developers must create `pcc_test` manually (CI creates it through its service container).
-5. **Migrations are untested.** Tests use `create_all`, so a migration/model mismatch would not be caught.
+5. **Unit tests still use `create_all`.** Model/migration drift is not caught by pytest; M3.5b.1 CI runs `alembic upgrade head` in the API image against disposable Postgres and checks Auth.js/`api_tokens` tables.
 6. **Health vs readiness.** `/api/v1/health` remains shallow (process up). `/api/v1/ready` checks Postgres. Redis is not required for v0.1 Render deploy.
 7. **Capture status never leaves `pending`**, and capture creation does not enqueue any job. The Inbox's "status" is therefore always `pending`.
 8. **Whitespace handling (resolved).** The API now trims title and content, so direct API clients cannot store padded values; the Server Action trims as well.
