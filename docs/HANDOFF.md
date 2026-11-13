@@ -25,7 +25,7 @@ Build PCC as a persistent personal system of record: captures, knowledge, tasks,
 - **Milestone 3.4** scoped API tokens merged (PR #6).
 - **Milestone 3.5a** Render deployment ADR merged (PR #7).
 - **Milestone 3.5b** production Dockerfiles; `render.yaml` (web + private API + Postgres; no Redis); `PCC_ENV=production` disables `/docs`/`/redoc`/`/openapi.json`; `/api/v1/ready` Postgres check; Auth.js secure-cookie/`AUTH_URL` helpers; Alembic only on API `preDeployCommand`; deploy docs under `docs/deploy/`. Merged to `main` (PR #8).
-- **Milestone 3.5b.1 (this work):** `.github/workflows/production-verification.yml` builds `apps/api` and `apps/web` production images (**no registry push / no deploy**); `scripts/smoke_production_containers.sh` starts disposable Postgres 16, runs `alembic upgrade head` in the API image, verifies Auth.js + `api_tokens` schema via `scripts/verify_production_schema.py`, smoke-tests health/ready/web `/api/health`, checks web→API private-network capture with disposable credentials, and runs fail-closed negatives (empty service credential, DB-down readiness, production web without `AUTH_URL`). **Not** real Google OAuth; **not** Milestone 3.5c.
+- **Milestone 3.5b.1 (this work):** `.github/workflows/production-verification.yml` builds `apps/api` and `apps/web` production images (**no registry push / no deploy**); `scripts/smoke_production_containers.sh` starts disposable Postgres 16, runs `alembic upgrade head` in the API image, verifies Auth.js + `api_tokens` schema via `scripts/verify_production_schema.py`, smoke-tests health/ready/web `/api/health`, checks web→API private-network capture with disposable credentials, and runs fail-closed negatives (empty service credential, DB-down readiness, production web without `AUTH_URL`). **CI green** on PR #9 (`6f7437e`: backend, frontend, Docker build/migrate/smoke). **Not** real Google OAuth; **not** Milestone 3.5c.
 - Capture UX/validation and M3.2–M3.4 auth behavior remain intact in code.
 
 ## Confirmed product priority (decision, 2026-11-12)
@@ -43,7 +43,7 @@ Build PCC as a persistent personal system of record: captures, knowledge, tasks,
 - Optional: request size limits / rate limiting not added in M3.5b.
 
 ## Immediate next step
-**Milestone 3.5b.1 CI verification is the gate before owner spend.** After the production-verification workflow is green on the PR:
+**Milestone 3.5b.1 CI verification is green** (PR #9). Remaining Milestone 3 work is owner spend:
 
 1. **Milestone 3.5c (owner only):** Create Render account/billing; intentionally apply `render.yaml` (creates paid resources).
 2. Set Dashboard secrets: `AUTH_URL`, Google OAuth, `PCC_ALLOWED_GOOGLE_EMAILS` (see `docs/deploy/production-env-checklist.md`).
