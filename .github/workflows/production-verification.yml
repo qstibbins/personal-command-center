@@ -1,5 +1,6 @@
-# Milestone 3.5b.1 — Production predeployment verification
+# Milestone 3.5b.1 / 3.5b.2 — Production predeployment + application-path verification
 # Builds production Docker images and smoke-tests them with disposable config.
+# M3.5b.2 exercises apps/web/app/api.ts helpers and tightens AUTH_URL negatives.
 # Does NOT push images, deploy, provision Render, or use live secrets.
 name: Production Verification
 

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Milestone 3.5b.1 — disposable production container smoke tests.
+# Milestone 3.5b.1 / 3.5b.2 — disposable production container smoke tests.
 # Builds are expected to be loaded as pcc-api:verify and pcc-web:verify.
 # Does not push images, provision Render, or use live secrets.
+# M3.5b.2 exercises apps/web/app/api.ts helpers (not raw Node fetch) and
+# tightens the AUTH_URL fail-closed assertion to an expected 5xx mode.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -182,49 +184,28 @@ web_health="$(http_body "http://${WEB_NAME}:3000/api/health")"
   || fail "unexpected web health body: $web_health"
 [[ "$web_health" == *'pcc-web'* ]] || fail "web health missing service id: $web_health"
 
-log "Container-to-container: web → API health/ready/auth via private network"
-docker exec \
-  -e SERVICE_CREDENTIAL="$SERVICE_CREDENTIAL" \
-  -e API_HOST="$API_NAME" \
-  "$WEB_NAME" \
-  node -e '
-const base = `http://${process.env.API_HOST}:10000`;
-const cred = process.env.SERVICE_CREDENTIAL;
-(async () => {
-  const health = await fetch(`${base}/api/v1/health`);
-  if (!health.ok) throw new Error(`health ${health.status}`);
-  const ready = await fetch(`${base}/api/v1/ready`);
-  if (!ready.ok) throw new Error(`ready ${ready.status}`);
-  const denied = await fetch(`${base}/api/v1/captures`);
-  if (denied.status !== 401) throw new Error(`expected 401, got ${denied.status}`);
-  const list = await fetch(`${base}/api/v1/captures`, {
-    headers: { Authorization: `Bearer ${cred}` },
-  });
-  if (!list.ok) throw new Error(`captures list ${list.status}`);
-  const create = await fetch(`${base}/api/v1/captures`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${cred}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      source_type: "text",
-      title: "verify-smoke",
-      content: "m3.5b.1 disposable container smoke",
-    }),
-  });
-  if (create.status !== 201 && create.status !== 200) {
-    throw new Error(`captures create ${create.status}`);
-  }
-  console.log("web→api private-network checks ok");
-})().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
-'
+log "Application path: real apps/web/app/api.ts helpers → API (private network)"
+# One-shot container from the production web image, same network/env wiring as
+# the running web service. Loads getApiBaseUrl + apiAuthHeaders from source
+# (server-only stubbed for Node). Does not bypass Auth.js or invent sessions.
+docker run --rm --network "$NETWORK" \
+  --user root \
+  -e NODE_ENV=production \
+  -e PCC_ENV=production \
+  -e PCC_SERVICE_CREDENTIAL="$SERVICE_CREDENTIAL" \
+  -e API_INTERNAL_HOSTPORT="${API_NAME}:10000" \
+  -e PCC_API_CLIENT_MODULE=/verify/api.ts \
+  -v "$ROOT/apps/web/app/api.ts:/verify/api.ts:ro" \
+  -v "$ROOT/scripts/verify_web_api_client.mjs:/verify/verify_web_api_client.mjs:ro" \
+  -v "$ROOT/scripts/hooks:/verify/hooks:ro" \
+  --entrypoint node \
+  "$WEB_IMAGE" \
+  --experimental-strip-types \
+  --import /verify/hooks/register-server-only.mjs \
+  /verify/verify_web_api_client.mjs
 
-capture_count="$(psql_q "SELECT count(*) FROM captures WHERE title = 'verify-smoke';")"
-[[ "$capture_count" -ge 1 ]] || fail "capture from web→api path was not persisted"
+capture_count="$(psql_q "SELECT count(*) FROM captures WHERE title = 'verify-app-path';")"
+[[ "$capture_count" -ge 1 ]] || fail "capture from application-path API client was not persisted"
 
 log "Negative: API readiness fails closed when database is unreachable"
 docker run -d \
@@ -276,16 +257,18 @@ docker run -d \
   "$WEB_IMAGE" >/dev/null
 wait_http "http://${WEB_NO_AUTH_URL_NAME}:3001/api/health" 200
 # Liveness stays up; Auth.js config must fail closed when AUTH_URL is missing.
+# Expected mode: assertProductionAuthUrlConfigured throws → route returns 5xx.
+# Do not accept arbitrary 4xx; do not assert incidental Next.js HTML wording.
 auth_code="$(http_code "http://${WEB_NO_AUTH_URL_NAME}:3001/api/auth/session")"
-if [[ "$auth_code" == "200" ]]; then
-  fail "production Auth.js session without AUTH_URL must not succeed (got 200)"
-fi
-if [[ "$auth_code" != "500" && "$auth_code" != "503" && "$auth_code" != "502" ]]; then
-  # 5xx is expected; also accept non-success 4xx if framework maps the throw.
-  if [[ "$auth_code" -lt 400 ]]; then
-    fail "expected Auth.js fail-closed status >=400 without AUTH_URL, got $auth_code"
-  fi
-fi
+case "$auth_code" in
+  500|502|503) ;;
+  *)
+    fail "expected Auth.js AUTH_URL fail-closed 5xx (500/502/503), got $auth_code"
+    ;;
+esac
+auth_logs="$(docker logs "$WEB_NO_AUTH_URL_NAME" 2>&1 || true)"
+[[ "$auth_logs" == *AUTH_URL* ]] \
+  || fail "expected AUTH_URL configuration error in web container logs"
 
 log "All production container verification checks passed"
-echo "PASS: images build/load assumed; migrate; health/ready; web↔api; negatives"
+echo "PASS: images build/load assumed; migrate; health/ready; app-path api client; negatives"

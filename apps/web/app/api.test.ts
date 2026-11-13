@@ -29,6 +29,13 @@ describe("getApiBaseUrl", () => {
       getApiBaseUrl({ API_INTERNAL_HOSTPORT: "http://pcc-api:10000/" }),
     ).toBe("http://pcc-api:10000");
   });
+
+  it("matches production smoke private-network hostport shape", () => {
+    // M3.5b.2 container verifier sets API_INTERNAL_HOSTPORT=pcc-api:10000.
+    expect(getApiBaseUrl({ API_INTERNAL_HOSTPORT: "pcc-api:10000" })).toBe(
+      "http://pcc-api:10000",
+    );
+  });
 });
 
 describe("apiAuthHeaders", () => {
