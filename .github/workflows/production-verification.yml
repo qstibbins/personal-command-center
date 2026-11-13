@@ -1,0 +1,49 @@
+# Milestone 3.5b.1 — Production predeployment verification
+# Builds production Docker images and smoke-tests them with disposable config.
+# Does NOT push images, deploy, provision Render, or use live secrets.
+name: Production Verification
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: production-verification-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docker-production-verify:
+    name: Docker build, migrate, smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build API production image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./apps/api
+          file: ./apps/api/Dockerfile
+          push: false
+          load: true
+          tags: pcc-api:verify
+          cache-from: type=gha,scope=pcc-api-verify
+          cache-to: type=gha,mode=max,scope=pcc-api-verify
+
+      - name: Build web production image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./apps/web/Dockerfile
+          push: false
+          load: true
+          tags: pcc-web:verify
+          cache-from: type=gha,scope=pcc-web-verify
+          cache-to: type=gha,mode=max,scope=pcc-web-verify
+
+      - name: Smoke-test containers, Alembic, and fail-closed negatives
+        run: bash scripts/smoke_production_containers.sh

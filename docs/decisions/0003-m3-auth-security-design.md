@@ -1,6 +1,6 @@
 # ADR 0003 — Milestone 3.1 authentication and API security design
 
-**Status:** Accepted. Milestones 3.2–3.4 are implemented in code; hosting/ingress for private deployment is decided in ADR 0004 (Render). Remaining Milestone 3 work is M3.5b repo deploy prep and owner provisioning.
+**Status:** Accepted. Milestones 3.2–3.4 are implemented in code; hosting/ingress for private deployment is decided in ADR 0004 (Render). M3.5b repo deploy prep is on `main`; M3.5b.1 adds CI image/smoke verification. Remaining Milestone 3 work is owner provisioning (M3.5c).
 **Date:** 2026-11-12
 
 ## Context
