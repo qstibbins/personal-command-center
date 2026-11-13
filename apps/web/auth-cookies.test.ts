@@ -55,6 +55,16 @@ describe("assertProductionAuthUrlConfigured", () => {
     ).toThrow(/https/);
   });
 
+  it("fails closed under PCC_ENV=production even if NODE_ENV differs", () => {
+    // Container smoke sets PCC_ENV=production; Auth.js factory must still throw.
+    expect(() =>
+      assertProductionAuthUrlConfigured({
+        NODE_ENV: "development",
+        PCC_ENV: "production",
+      }),
+    ).toThrow(/AUTH_URL must be set/);
+  });
+
   it("accepts https AUTH_URL in production", () => {
     expect(() =>
       assertProductionAuthUrlConfigured({

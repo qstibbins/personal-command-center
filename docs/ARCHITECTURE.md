@@ -1,7 +1,7 @@
 # Personal Command Center (PCC) — Architecture
 
-**Last updated:** 2026-11-13 (Milestone 3.5b.1 production predeployment verification)
-**Branch inspected:** `main` through Milestone 3.5b (PR #8 / `7346091`); M3.5b.1 on `test/m3-production-verification`
+**Last updated:** 2026-11-13 (Milestone 3.5b.2 application-path verification)
+**Branch inspected:** `main` through Milestone 3.5b.1 (PR #9 / `4d8870f`); M3.5b.2 on `test/m3-application-path-verification`
 
 ## How to read this document
 
@@ -270,6 +270,8 @@ Prerequisites per README: Docker, Node 22, pnpm 10.11.0, Python 3.12+, `uv`.
 | Backend `uv run pytest` (`pcc_test`) and `ruff check src tests` | Covered by `.github/workflows/ci.yml` |
 | Alembic through `0004_api_tokens` (Auth.js + `api_tokens`) | Exercised in M3.5b.1 production-verification workflow against disposable Postgres 16 |
 | Production Docker image build + container smoke | `.github/workflows/production-verification.yml` (no image push; no Render) |
+| Application-path web→API via `apps/web/app/api.ts` helpers | M3.5b.2: `scripts/verify_web_api_client.mjs` in production-verification smoke |
+| AUTH_URL missing → Auth.js fail-closed 5xx | M3.5b.2 smoke asserts 500/502/503 + `AUTH_URL` in web logs |
 | Browser acceptance of the capture form | **Performed 2026-11-12** (pre-auth). M3.3 Google OAuth browser acceptance still required (see `docs/google-signin-local.md`) |
 | Client bundle secret leakage check | No `AUTH_*` / service credential values found under `.next/static` after production build |
 
@@ -282,7 +284,7 @@ Everything below comes from `PROJECT.md`, `ROADMAP.md`, `HANDOFF.md`, and the AD
 ## B1. Authentication, API security, and minimal private deployment (Roadmap M3)
 **Partial delivery:** Milestone 3.1 (ADR 0003) is accepted. **Milestones 3.2–3.4** are implemented in Part A: FastAPI service credential + scopes; Auth.js Google sign-in with PostgreSQL database sessions; hashed scoped revocable API tokens with owner-only management UI. Health remains unauthenticated at the API. Real Google OAuth browser acceptance for 3.3 may still be pending after merge.
 
-**Hosting (Milestones 3.5a–3.5b.1):** ADR 0004 selects **Render**. Repo prep includes Dockerfiles, `render.yaml` (public web + private API + Postgres; no Redis), `/api/v1/ready`, production docs lockdown, Auth.js `AUTH_URL`/secure cookies, and `docs/deploy/*` runbooks. M3.5b.1 adds CI production image builds and disposable container migrate/smoke/negative checks (no registry push, no live secrets). Exposure model: public website + strict app auth; **do not** expose FastAPI publicly in v0.1.
+**Hosting (Milestones 3.5a–3.5b.2):** ADR 0004 selects **Render**. Repo prep includes Dockerfiles, `render.yaml` (public web + private API + Postgres; no Redis), `/api/v1/ready`, production docs lockdown, Auth.js `AUTH_URL`/secure cookies, and `docs/deploy/*` runbooks. M3.5b.1 adds CI production image builds and disposable container migrate/smoke/negative checks (no registry push, no live secrets). M3.5b.2 exercises real `getApiBaseUrl` / `apiAuthHeaders` in that smoke and tightens AUTH_URL negatives to expected 5xx. Full authenticated Server Action still needs live Google OAuth. Exposure model: public website + strict app auth; **do not** expose FastAPI publicly in v0.1.
 
 **Still planned (Milestone 3.5c — owner):** applying the Blueprint, production secrets on Render, live TLS domain, Google production OAuth URIs, backup restore drill, and cutover acceptance. ChatGPT iPhone feasibility remains a Milestone 4 gate. Full auth design: `docs/decisions/0003-m3-auth-security-design.md`. Full deploy design: `docs/decisions/0004-m3-render-deployment.md`.
 

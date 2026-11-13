@@ -44,6 +44,8 @@ describe("createCapture", () => {
     getAllowlistedSessionMock.mockReset();
     vi.mocked(revalidatePath).mockReset();
     delete process.env.PCC_SERVICE_CREDENTIAL;
+    delete process.env.API_INTERNAL_HOSTPORT;
+    delete process.env.API_INTERNAL_URL;
   });
 
   it("returns success with cleared values and revalidates when saved", async () => {
@@ -322,6 +324,21 @@ describe("createCapture", () => {
     );
     expect(JSON.stringify(state)).not.toContain(TEST_SERVICE_CREDENTIAL);
     expect(JSON.stringify(state)).not.toContain("Authorization");
+  });
+
+  it("posts captures through getApiBaseUrl (API_INTERNAL_HOSTPORT wiring)", async () => {
+    process.env.API_INTERNAL_HOSTPORT = "pcc-api:10000";
+    fetchMock.mockResolvedValue({ ok: true, status: 201 });
+
+    await createCapture(
+      initialCaptureState,
+      makeForm({ source_type: "text", title: "", content: "hostport path" }),
+    );
+
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "http://pcc-api:10000/api/v1/captures",
+    );
+    delete process.env.API_INTERNAL_HOSTPORT;
   });
 
   it("fails closed without calling fetch when the service credential is missing", async () => {
