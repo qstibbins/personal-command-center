@@ -8,12 +8,16 @@ from pcc.auth.dependencies import require_scopes, require_service_principal
 from pcc.auth.principals import (
     SCOPE_CAPTURES_READ,
     SCOPE_CAPTURES_WRITE,
+    SCOPE_CHAT_READ,
+    SCOPE_CHAT_WRITE,
     AuthPrincipal,
 )
 
 __all__ = [
     "SCOPE_CAPTURES_READ",
     "SCOPE_CAPTURES_WRITE",
+    "SCOPE_CHAT_READ",
+    "SCOPE_CHAT_WRITE",
     "AuthPrincipal",
     "require_scopes",
     "require_service_principal",

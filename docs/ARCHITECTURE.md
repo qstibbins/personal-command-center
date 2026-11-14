@@ -1,7 +1,7 @@
 # Personal Command Center (PCC) — Architecture
 
-**Last updated:** 2026-11-13 (Milestone 3.5b.2 application-path verification)
-**Branch inspected:** `main` through Milestone 3.5b.1 (PR #9 / `4d8870f`); M3.5b.2 on `test/m3-application-path-verification`
+**Last updated:** 2026-11-14 (Phase 1A.2 PR1 chat schema foundation)
+**Branch inspected:** `main` through Milestone 3.5b.2; chat schema on `cursor/chat-schema-foundation-f6aa`
 
 ## How to read this document
 
@@ -22,7 +22,7 @@ Product intent lives in `PROJECT.md`, sequencing in `ROADMAP.md`, and the next a
 PCC is currently a **single-user capture-and-Inbox application**. A user signs in with an allowlisted Google account, then submits text or a URL string through a web form. It is stored in PostgreSQL and listed in an Inbox. That is the only implemented product capability.
 
 - Website auth: Auth.js v5 Google sign-in with a verified-email allowlist and PostgreSQL database sessions. Pages and Server Actions check the session server-side; sign-out deletes the session row.
-- FastAPI capture endpoints accept either the Next.js service credential (`PCC_SERVICE_CREDENTIAL`) or a hashed, scoped, revocable personal API token with scopes `captures:read` / `captures:write`.
+- FastAPI capture endpoints accept either the Next.js service credential (`PCC_SERVICE_CREDENTIAL`) or a hashed, scoped, revocable personal API token with scopes `captures:read` / `captures:write`. The service principal also carries `chat:read` / `chat:write` for upcoming chat BFF calls; personal token issuance remains capture-only.
 - Owner-only API token management: allowlisted Auth.js session on `/settings/api-tokens`, which calls FastAPI management routes using the service credential only (API tokens cannot manage tokens).
 - No AI/LLM integration exists.
 - No code processes captures: they are stored as `pending` and never change status.
@@ -95,7 +95,7 @@ The browser never talks to FastAPI directly. All API calls originate from the Ne
 
 OpenAPI docs (`/docs`, `/redoc`, `/openapi.json`) are served only when `PCC_ENV` is not `production`. In production they return 404. Calling protected endpoints from `/docs` in non-production still requires a Bearer token.
 
-**Auth (Milestones 3.2–3.4):** FastAPI `pcc.auth` verifies `Authorization: Bearer` against `PCC_SERVICE_CREDENTIAL` (and optional previous) **or** a row in `api_tokens` matched by SHA-256 hash. Revoked and expired API tokens yield 401. Scopes are enforced independently via `require_scopes(...)`. Token management routes reject API-token principals (403) and must be reached through the allowlisted Next.js session control path. Website Auth.js v5 Google sign-in with PostgreSQL database sessions protects pages and Server Actions.
+**Auth (Milestones 3.2–3.4 + Phase 1A PR1 scopes):** FastAPI `pcc.auth` verifies `Authorization: Bearer` against `PCC_SERVICE_CREDENTIAL` (and optional previous) **or** a row in `api_tokens` matched by SHA-256 hash. Revoked and expired API tokens yield 401. Scopes are enforced independently via `require_scopes(...)`. Service credential scopes include capture + chat; `AllowedScope` for personal tokens stays capture-only. Token management routes reject API-token principals (403) and must be reached through the allowlisted Next.js session control path. Website Auth.js v5 Google sign-in with PostgreSQL database sessions protects pages and Server Actions.
 
 **Not implemented:** get-by-id, update, delete, search, pagination beyond `limit`, task or project endpoints, ChatGPT integration.
 
@@ -108,7 +108,7 @@ OpenAPI docs (`/docs`, `/redoc`, `/openapi.json`) are served only when `PCC_ENV`
 
 ## A4. Data model (verified from `db/models.py` and migrations)
 
-Application, Auth.js, and API-token tables exist, created by Alembic revisions `0001_initial`, `09d577e3aed4` (captures), `0003_authjs_tables` (Auth.js), and `0004_api_tokens`.
+Application, Auth.js, API-token, and chat tables exist, created by Alembic revisions `0001_initial`, `09d577e3aed4` (captures), `0003_authjs_tables` (Auth.js), `0004_api_tokens`, and `0005_chat_schema` (provider-neutral chat).
 
 **`captures`** (product data; Auth.js uses separate session tables below)
 
@@ -142,7 +142,16 @@ Only `pending` is ever written. `processing`, `processed` and `failed` are permi
 | `revoked_at` | timestamptz, nullable | Set on revoke; revoked tokens authenticate as 401 |
 | `created_by_email` | varchar(320) | Allowlisted operator email at issuance |
 
-**Not present:** tables for conversations, messages, knowledge, threads/workstreams, agents, or runs.
+**Chat tables** (Alembic `0005_chat_schema`; SQLAlchemy `Conversation`, `Message`, `MessageUsage`, `ChatRun`) — Phase 1A.2 PR1 schema only (no chat API/orchestrator yet):
+
+| Table | Role |
+|---|---|
+| `conversations` | Owner-scoped threads; `next_sequence` allocator; soft delete via `status=deleted`; import hooks `source` / `source_external_id` |
+| `messages` | Ordered by unique `(conversation_id, sequence)`; roles `system\|user\|assistant\|tool`; statuses `complete\|streaming\|partial\|failed` (no `cancelled`) |
+| `message_usage` | Optional 1:1 usage row keyed by `message_id` |
+| `chat_runs` | Generation attempts; partial unique one `running` run per conversation |
+
+**Not present:** knowledge, threads/workstreams, agents beyond `chat_runs`, or tool-invocation tables.
 
 ## A5. Backend structure and conventions
 
@@ -268,7 +277,7 @@ Prerequisites per README: Docker, Node 22, pnpm 10.11.0, Python 3.12+, `uv`.
 | Source, config, migrations, tests, CI and Compose were read for this document | Done (updated for M3.5b.1 on 2026-11-13) |
 | Frontend `pnpm lint:web`, `pnpm test:web`, `pnpm build:web` | Covered by `.github/workflows/ci.yml` |
 | Backend `uv run pytest` (`pcc_test`) and `ruff check src tests` | Covered by `.github/workflows/ci.yml` |
-| Alembic through `0004_api_tokens` (Auth.js + `api_tokens`) | Exercised in M3.5b.1 production-verification workflow against disposable Postgres 16 |
+| Alembic through `0005_chat_schema` (Auth.js + `api_tokens` + chat) | Exercised in production-verification workflow + pytest `test_chat_alembic.py` against PostgreSQL |
 | Production Docker image build + container smoke | `.github/workflows/production-verification.yml` (no image push; no Render) |
 | Application-path web→API via `apps/web/app/api.ts` helpers | M3.5b.2: `scripts/verify_web_api_client.mjs` in production-verification smoke |
 | AUTH_URL missing → Auth.js fail-closed 5xx | M3.5b.2 smoke asserts 500/502/503 + `AUTH_URL` in web logs |
@@ -336,7 +345,7 @@ Planned: Redis/RQ processing of captures, an AI-provider abstraction with budget
 2. **CI skipped frontend tests (resolved).** The frontend job now runs `test:web` between `lint:web` and `build:web`.
 3. **`make test` fails without `TEST_DATABASE_URL`** for the same reason as (1).
 4. **Local `pcc_test` is still not created by repo tooling.** Compose creates only `pcc`, so developers must create `pcc_test` manually (CI creates it through its service container).
-5. **Unit tests still use `create_all`.** Model/migration drift is not caught by pytest; M3.5b.1 CI runs `alembic upgrade head` in the API image against disposable Postgres and checks Auth.js/`api_tokens` tables.
+5. **Unit tests still use `create_all` for most API tests.** Chat schema also has `tests/test_chat_alembic.py` (upgrade/downgrade on `pcc_test`) and production-verification still runs `alembic upgrade head` + `scripts/verify_production_schema.py` (head `0005_chat_schema`, chat tables/indexes).
 6. **Health vs readiness.** `/api/v1/health` remains shallow (process up). `/api/v1/ready` checks Postgres. Redis is not required for v0.1 Render deploy.
 7. **Capture status never leaves `pending`**, and capture creation does not enqueue any job. The Inbox's "status" is therefore always `pending`.
 8. **Whitespace handling (resolved).** The API now trims title and content, so direct API clients cannot store padded values; the Server Action trims as well.

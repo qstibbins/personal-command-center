@@ -2,11 +2,18 @@ from dataclasses import dataclass
 
 SCOPE_CAPTURES_READ = "captures:read"
 SCOPE_CAPTURES_WRITE = "captures:write"
+SCOPE_CHAT_READ = "chat:read"
+SCOPE_CHAT_WRITE = "chat:write"
 
-# The Next.js service principal receives both capture scopes for the Universal
-# Capture workflow. Future API tokens will carry an explicit subset.
+# The Next.js service principal receives capture + chat scopes for website BFF
+# calls. Personal API tokens remain capture-only (AllowedScope closed).
 SERVICE_CREDENTIAL_SCOPES: frozenset[str] = frozenset(
-    {SCOPE_CAPTURES_READ, SCOPE_CAPTURES_WRITE}
+    {
+        SCOPE_CAPTURES_READ,
+        SCOPE_CAPTURES_WRITE,
+        SCOPE_CHAT_READ,
+        SCOPE_CHAT_WRITE,
+    }
 )
 
 
