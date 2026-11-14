@@ -228,6 +228,22 @@ def test_collect_stream_helper_matches_complete():
     assert via_helper["usage"] == via_complete["usage"]
 
 
+def test_collect_stream_preserves_error_over_later_message_end():
+    """Regression: an earlier error must not be reported as a successful stop."""
+    events = [
+        {"type": "message_start", "role": "assistant"},
+        {"type": "content_delta", "delta": "Hi"},
+        {"type": "error", "error_code": "rate_limited", "message": "slow down"},
+        # Malformed/trailing success must not wipe the error state.
+        {"type": "message_end", "status": "complete", "finish_reason": "stop"},
+    ]
+    result = collect_stream(iter(events))
+    assert result["error_code"] == "rate_limited"
+    assert result["error_message"] == "slow down"
+    assert result["finish_reason"] == "error"
+    assert result["content"] == "Hi"
+
+
 def test_registry_returns_mock_by_default(monkeypatch):
     monkeypatch.setenv("PCC_ENV", "development")
     monkeypatch.setenv("PCC_DEFAULT_CHAT_PROVIDER", "mock")

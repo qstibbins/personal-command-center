@@ -80,3 +80,53 @@ def require_service_principal(
             detail="Insufficient permissions",
         )
     return principal
+
+
+def require_chat_service_principal(*required_scopes: str):
+    """Authenticate chat callers without holding a DB session for streaming.
+
+    Phase 1A chat accepts ``owner_email`` only from the Next.js service
+    principal (BFF trust boundary). Personal API tokens are rejected here
+    even if scopes were somehow present — and issuance stays capture-only.
+    """
+    if not required_scopes:
+        raise ValueError("require_chat_service_principal() needs at least one scope")
+
+    required = frozenset(required_scopes)
+
+    def dependency(
+        credentials: Annotated[
+            HTTPAuthorizationCredentials | None, Depends(_bearer_scheme)
+        ],
+        settings: Annotated[Settings, Depends(get_settings)],
+    ) -> AuthPrincipal:
+        from pcc.auth.credentials import verify_service_credential
+
+        if (
+            credentials is None
+            or credentials.scheme.lower() != "bearer"
+            or not credentials.credentials
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Not authenticated",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        principal = verify_service_credential(credentials.credentials, settings)
+        if principal is None:
+            # Do not fall through to API-token verification for chat owner assertion.
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid credentials",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        if not required.issubset(principal.scopes):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Insufficient permissions",
+            )
+        return principal
+
+    return dependency

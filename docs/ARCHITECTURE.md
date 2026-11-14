@@ -1,7 +1,7 @@
 # Personal Command Center (PCC) — Architecture
 
-**Last updated:** 2026-11-14 (Phase 1A.2 PR2 mock provider adapter)
-**Branch inspected:** `main` through Phase 1A.2 PR1; mock provider on `cursor/chat-mock-provider-f6aa`
+**Last updated:** 2026-11-14 (Phase 1A.2 PR3 chat orchestration API)
+**Branch inspected:** `main` through Phase 1A.2 PR2; orchestration on `feat/chat-orchestration-api`
 
 ## How to read this document
 
@@ -49,7 +49,7 @@ Browser ──HTML/RSC/Server Action──▶ Next.js (apps/web, :3000)
 | Auth.js | `apps/web/auth.ts`, `auth-allowlist.ts`, `auth-session.ts`, `app/api/auth/[...nextauth]` | Google provider, `@auth/pg-adapter` database sessions, allowlist, handlers. |
 | Server Action | `apps/web/app/actions.ts`, `api-tokens-actions.ts` | `createCapture` and token create/list/revoke require allowlisted session, then call FastAPI with the service credential. |
 | Client form | `apps/web/app/capture-form.tsx` | `useActionState` form: pending ("Saving…"), success message with reset, error message with input preserved. |
-| API | `apps/api/src/pcc/main.py`, `api/captures.py`, `api/api_tokens.py` | FastAPI app exposing health, capture, and API-token management endpoints. |
+| API | `apps/api/src/pcc/main.py`, `api/captures.py`, `api/api_tokens.py`, `api/chat.py` | FastAPI app exposing health, capture, API-token, and chat (CRUD + SSE) endpoints. |
 | API auth | `apps/api/src/pcc/auth/` | Bearer service-credential and hashed API-token verification; `require_scopes`; `require_service_principal` for token management. |
 | Services | `apps/api/src/pcc/services/captures.py`, `services/api_tokens.py` | Capture CRUD helpers and API token lifecycle (hash-only storage). |
 | Schemas | `apps/api/src/pcc/schemas/capture.py`, `schemas/api_token.py` | Pydantic request/response models and validation. |
@@ -92,12 +92,16 @@ The browser never talks to FastAPI directly. All API calls originate from the Ne
 | `POST /api/v1/api-tokens` | Service credential only (`require_service_principal`). Creates a scoped token; returns metadata plus the raw token **once**. Persists only the SHA-256 hash. |
 | `GET /api/v1/api-tokens` | Service credential only. Lists token metadata (no raw token, no hash). |
 | `POST /api/v1/api-tokens/{id}/revoke` | Service credential only. Sets `revoked_at`; idempotent if already revoked. |
+| `GET/POST /api/v1/chat/conversations` | Service principal + `chat:read`/`chat:write`. Owner required (`owner_email` query/body). |
+| `GET/PATCH/DELETE /api/v1/chat/conversations/{id}` | Owner-scoped metadata, archive, soft delete. |
+| `GET/POST …/messages` | History (JSON) or send + SSE mock stream; **409** `run_in_progress` if a run is active. |
+| `POST /api/v1/chat/runs/{run_id}/cancel` | Idempotent abort; finalize to `partial` + `cancelled`. |
 
 OpenAPI docs (`/docs`, `/redoc`, `/openapi.json`) are served only when `PCC_ENV` is not `production`. In production they return 404. Calling protected endpoints from `/docs` in non-production still requires a Bearer token.
 
-**Auth (Milestones 3.2–3.4 + Phase 1A PR1 scopes):** FastAPI `pcc.auth` verifies `Authorization: Bearer` against `PCC_SERVICE_CREDENTIAL` (and optional previous) **or** a row in `api_tokens` matched by SHA-256 hash. Revoked and expired API tokens yield 401. Scopes are enforced independently via `require_scopes(...)`. Service credential scopes include capture + chat; `AllowedScope` for personal tokens stays capture-only. Token management routes reject API-token principals (403) and must be reached through the allowlisted Next.js session control path. Website Auth.js v5 Google sign-in with PostgreSQL database sessions protects pages and Server Actions.
+**Auth (Milestones 3.2–3.4 + Phase 1A PR1 scopes):** FastAPI `pcc.auth` verifies `Authorization: Bearer` against `PCC_SERVICE_CREDENTIAL` (and optional previous) **or** a row in `api_tokens` matched by SHA-256 hash. Revoked and expired API tokens yield 401. Scopes are enforced independently via `require_scopes(...)`. Service credential scopes include capture + chat; `AllowedScope` for personal tokens stays capture-only. Chat routes use service-principal-only auth (no DB session held for streaming) and require BFF-asserted `owner_email`. Token management routes reject API-token principals (403) and must be reached through the allowlisted Next.js session control path. Website Auth.js v5 Google sign-in with PostgreSQL database sessions protects pages and Server Actions.
 
-**Not implemented:** get-by-id, update, delete, search, pagination beyond `limit`, task or project endpoints, ChatGPT integration.
+**Not implemented:** capture get-by-id/update/delete, task/project endpoints, Next.js chat BFF/UI, real AI providers, ChatGPT import.
 
 **Validation rules (`schemas/capture.py`, enforced by FastAPI):**
 - `title` and `content` have leading/trailing whitespace trimmed; internal whitespace and line breaks are preserved. A blank title becomes `null`; blank content is rejected. Title max is 300 characters.
@@ -142,7 +146,7 @@ Only `pending` is ever written. `processing`, `processed` and `failed` are permi
 | `revoked_at` | timestamptz, nullable | Set on revoke; revoked tokens authenticate as 401 |
 | `created_by_email` | varchar(320) | Allowlisted operator email at issuance |
 
-**Chat tables** (Alembic `0005_chat_schema`; SQLAlchemy `Conversation`, `Message`, `MessageUsage`, `ChatRun`) — Phase 1A.2 PR1 schema only (no chat API/orchestrator yet):
+**Chat tables** (Alembic `0005_chat_schema`; SQLAlchemy `Conversation`, `Message`, `MessageUsage`, `ChatRun`) — used by Phase 1A.2 PR3 orchestrator + `/api/v1/chat/*`:
 
 | Table | Role |
 |---|---|
@@ -162,10 +166,10 @@ apps/api/
   migrations/             # env.py reads DATABASE_URL via pcc.core.config (overrides alembic.ini URL)
   src/pcc/
     main.py               # FastAPI app, health route, captures + api-tokens routers
-    api/{deps,captures,api_tokens}.py
-    auth/                 # principals, credentials, token_crypto, require_scopes / require_service_principal
-    schemas/{capture,api_token}.py
-    services/{captures,api_tokens,chat_ownership}.py
+    api/{deps,captures,api_tokens,chat}.py
+    auth/                 # principals, credentials, token_crypto, require_scopes / chat service principal
+    schemas/{capture,api_token,chat}.py
+    services/{captures,api_tokens,chat_ownership,chat_conversations,chat_orchestrator,chat_abort}.py
     providers/            # ProviderAdapter Protocol + MockProvider (Phase 1A.2 PR2)
     db/{base,models,session}.py
     core/config.py        # pydantic-settings: database_url, redis_url, service credential, default chat provider

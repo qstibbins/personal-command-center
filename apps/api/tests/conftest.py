@@ -41,8 +41,7 @@ def auth_headers():
     return {"Authorization": f"Bearer {TEST_SERVICE_CREDENTIAL}"}
 
 
-@pytest.fixture
-def db_client(auth_headers):
+def _bind_test_database():
     database_url = os.environ.get("TEST_DATABASE_URL")
     if not database_url:
         pytest.fail("Set TEST_DATABASE_URL to the isolated pcc_test database")
@@ -51,10 +50,18 @@ def db_client(auth_headers):
     if url.database != "pcc_test":
         pytest.fail("Refusing to modify a database other than pcc_test")
 
+    from pcc.db import session as db_session
+    from pcc.services import chat_abort
+
     engine = create_engine(database_url)
     session_factory = sessionmaker(bind=engine, autoflush=False)
+    original_engine = db_session.engine
+    original_session_local = db_session.SessionLocal
 
     Base.metadata.create_all(engine)
+    db_session.engine = engine
+    db_session.SessionLocal = session_factory
+    chat_abort.clear_all_for_tests()
 
     def override_get_db():
         with session_factory() as session:
@@ -62,6 +69,20 @@ def db_client(auth_headers):
 
     app.dependency_overrides[get_db] = override_get_db
 
+    def cleanup():
+        app.dependency_overrides.pop(get_db, None)
+        chat_abort.clear_all_for_tests()
+        db_session.SessionLocal = original_session_local
+        db_session.engine = original_engine
+        Base.metadata.drop_all(engine)
+        engine.dispose()
+
+    return cleanup
+
+
+@pytest.fixture
+def db_client(auth_headers):
+    cleanup = _bind_test_database()
     try:
         with TestClient(app) as client:
             # Default authorized headers for capture workflow tests. Auth is
@@ -69,37 +90,15 @@ def db_client(auth_headers):
             client.headers.update(auth_headers)
             yield client
     finally:
-        app.dependency_overrides.pop(get_db, None)
-        Base.metadata.drop_all(engine)
-        engine.dispose()
+        cleanup()
 
 
 @pytest.fixture
 def raw_db_client():
     """Isolated DB client with no default Authorization header."""
-    database_url = os.environ.get("TEST_DATABASE_URL")
-    if not database_url:
-        pytest.fail("Set TEST_DATABASE_URL to the isolated pcc_test database")
-
-    url = make_url(database_url)
-    if url.database != "pcc_test":
-        pytest.fail("Refusing to modify a database other than pcc_test")
-
-    engine = create_engine(database_url)
-    session_factory = sessionmaker(bind=engine, autoflush=False)
-
-    Base.metadata.create_all(engine)
-
-    def override_get_db():
-        with session_factory() as session:
-            yield session
-
-    app.dependency_overrides[get_db] = override_get_db
-
+    cleanup = _bind_test_database()
     try:
         with TestClient(app) as client:
             yield client
     finally:
-        app.dependency_overrides.pop(get_db, None)
-        Base.metadata.drop_all(engine)
-        engine.dispose()
+        cleanup()

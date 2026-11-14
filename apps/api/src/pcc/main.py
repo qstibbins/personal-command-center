@@ -4,6 +4,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from pcc.api.api_tokens import router as api_tokens_router
 from pcc.api.captures import router as captures_router
+from pcc.api.chat import router as chat_router
 from pcc.core.config import get_settings
 from pcc.db.session import engine
 
@@ -20,6 +21,7 @@ def create_app() -> FastAPI:
     )
     application.include_router(captures_router)
     application.include_router(api_tokens_router)
+    application.include_router(chat_router)
 
     @application.get("/api/v1/health")
     def health() -> dict[str, str]:
