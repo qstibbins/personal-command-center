@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     pcc_service_credential_previous: str = ""
     # deployment environment: "production" disables OpenAPI docs UI.
     pcc_env: str = "development"
+    # Phase 1A chat default provider (mock requires no API keys).
+    pcc_default_chat_provider: str = "mock"
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @field_validator("database_url", mode="before")

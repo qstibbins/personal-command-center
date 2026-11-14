@@ -1,7 +1,7 @@
 # Personal Command Center (PCC) — Architecture
 
-**Last updated:** 2026-11-14 (Phase 1A.2 PR1 chat schema foundation)
-**Branch inspected:** `main` through Milestone 3.5b.2; chat schema on `cursor/chat-schema-foundation-f6aa`
+**Last updated:** 2026-11-14 (Phase 1A.2 PR2 mock provider adapter)
+**Branch inspected:** `main` through Phase 1A.2 PR1; mock provider on `cursor/chat-mock-provider-f6aa`
 
 ## How to read this document
 
@@ -165,11 +165,12 @@ apps/api/
     api/{deps,captures,api_tokens}.py
     auth/                 # principals, credentials, token_crypto, require_scopes / require_service_principal
     schemas/{capture,api_token}.py
-    services/{captures,api_tokens}.py
+    services/{captures,api_tokens,chat_ownership}.py
+    providers/            # ProviderAdapter Protocol + MockProvider (Phase 1A.2 PR2)
     db/{base,models,session}.py
-    core/config.py        # pydantic-settings: database_url, redis_url, service credential
+    core/config.py        # pydantic-settings: database_url, redis_url, service credential, default chat provider
     worker/{main,jobs,submit_demo}.py
-  tests/                  # conftest, captures, validation, auth, api_tokens, health
+  tests/                  # conftest, captures, validation, auth, api_tokens, health, chat schema, providers
 ```
 
 The layering is route → service → SQLAlchemy model, with Pydantic schemas at the boundary. Sessions are created per request by `get_db`. Services call `commit()` themselves.
