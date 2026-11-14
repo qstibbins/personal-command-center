@@ -49,7 +49,7 @@ Build PCC as a persistent personal system of record: captures, knowledge, tasks,
   3. Capture-create assertion accepts HTTP `200` or `201` rather than the exact expected FastAPI create status (`201`) in `scripts/verify_web_api_client.mjs`.
 
 ## Phase 1A note (in progress; does not complete M3.5c)
-Phase 1A.1 architecture is finalized (provider-neutral chat). Phase 1A.2 **PR1** adds Alembic `0005_chat_schema` (`conversations` / `messages` / `message_usage` / `chat_runs`), service-principal `chat:read`/`chat:write` scopes (personal tokens remain capture-only), and CI Alembic verification. No chat UI/API/orchestrator yet. **Do not mark Milestone 3.5c complete.**
+Phase 1A.1 architecture is finalized (provider-neutral chat). Phase 1A.2 **PR1** (merged) adds Alembic `0005_chat_schema` and chat scopes. **PR2** adds `pcc.providers` (`ProviderAdapter` Protocol + sync `MockProvider` + registry); no chat API/orchestrator/UI yet. **Do not mark Milestone 3.5c complete.**
 
 ## Immediate next step
 **Milestone 3.5b.2 is complete** on `main` (`055fb57`). Remaining Milestone 3 work is owner spend — do **not** start until the owner asks:
