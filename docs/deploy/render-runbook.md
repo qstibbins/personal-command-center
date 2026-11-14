@@ -6,7 +6,7 @@ Companion to ADR 0004. This runbook is preparation only until the owner provisio
 
 | Rule | Detail |
 |---|---|
-| **Owner** | Alembic in `apps/api` (revisions through `0004_api_tokens`, including Auth.js tables) |
+| **Owner** | Alembic in `apps/api` (revisions through `0005_chat_schema`, including Auth.js, `api_tokens`, and chat tables) |
 | **When** | `pcc-api` `preDeployCommand`: `alembic upgrade head` |
 | **Who must not migrate** | `pcc-web` — no migration command (avoids concurrent Alembic) |
 | **Failure behavior** | If pre-deploy exits non-zero, Render **cancels** that API deploy; the previous healthy API instance keeps serving |

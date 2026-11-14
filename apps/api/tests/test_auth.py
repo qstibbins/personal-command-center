@@ -9,6 +9,8 @@ from pcc.auth.dependencies import get_principal
 from pcc.auth.principals import (
     SCOPE_CAPTURES_READ,
     SCOPE_CAPTURES_WRITE,
+    SCOPE_CHAT_READ,
+    SCOPE_CHAT_WRITE,
     AuthPrincipal,
 )
 from pcc.core.config import get_settings
@@ -231,6 +233,8 @@ def test_verify_bearer_token_prefers_service_credential(raw_db_client):
         assert principal.auth_method == "service_credential"
         assert SCOPE_CAPTURES_READ in principal.scopes
         assert SCOPE_CAPTURES_WRITE in principal.scopes
+        assert SCOPE_CHAT_READ in principal.scopes
+        assert SCOPE_CHAT_WRITE in principal.scopes
         assert verify_api_token("not-a-real-token", session) is None
     engine.dispose()
 
