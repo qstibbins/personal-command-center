@@ -31,12 +31,15 @@ Redis / RQ worker: **not deployed** for v0.1.
 
 Optional: `AUTH_DATABASE_URL` if you prefer a dedicated `postgresql://` URL for Auth.js instead of rewriting `DATABASE_URL`.
 
+**Chat BFF (Phase 1A.2 PR4):** `/api/chat/*` reuses the same `PCC_SERVICE_CREDENTIAL` + `API_INTERNAL_HOSTPORT` / `API_INTERNAL_URL`. No additional web secrets. `owner_email` is derived from the allowlisted Auth.js session only. Keep **exactly one non-overlapping `pcc-api` process** (PR3 abort/recovery); do not scale the private API for chat.
+
 ### `pcc-api` (FastAPI)
 
 | Variable | Source | Notes |
 |---|---|---|
 | `PCC_ENV` | Blueprint `production` | Disables `/docs`, `/redoc`, `/openapi.json` |
 | `PCC_SERVICE_CREDENTIAL` | `generateValue` | Shared with web |
+| `PCC_CHAT_ASSUME_SINGLE_WORKER` | Blueprint `true` | Recovery gate only — still require one non-overlapping API process |
 | `DATABASE_URL` | From `pcc-db` internal URL | Normalized to `postgresql+psycopg://` in app |
 | `PORT` | Render | Default private-service port (commonly `10000`) |
 
