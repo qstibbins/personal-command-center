@@ -48,8 +48,8 @@ Build PCC as a persistent personal system of record: captures, knowledge, tasks,
   2. The one-shot verifier runs with `--user root` (test-only; not the production `nextjs` UID entrypoint).
   3. Capture-create assertion accepts HTTP `200` or `201` rather than the exact expected FastAPI create status (`201`) in `scripts/verify_web_api_client.mjs`.
 
-## Phase 1A note (in progress; does not complete M3.5c)
-Phase 1A.1 architecture is finalized (provider-neutral chat). Phase 1A.2 **PR1–PR3** merged (schema + MockProvider + orchestration API). **PR4** adds authenticated Next.js chat BFF (`/api/chat/*`) with SSE pass-through, session-derived `owner_email`, and abort forwarding — no chat UI yet (PR5). Keep **exactly one non-overlapping `pcc-api` process**. **Do not mark Milestone 3.5c complete.**
+## Phase 1A note (docs/ADR; does not complete M3.5c)
+Phase 1A.1 architecture is finalized. Phase 1A.2 **PR1–PR5** are on `main` (schema, MockProvider, orchestrator API, Next.js BFF, responsive `/chat` UI with streamId isolation). **ADR 0005** (`docs/decisions/0005-provider-neutral-chat.md`) records the accepted architecture; index at `docs/chat-architecture.md`. Mobile Safari/Simulator checklist: `docs/chat-mobile-verification.md` (still required for full Phase 1A mobile acceptance). Keep **exactly one non-overlapping `pcc-api` process**. Mock-only — no paid providers. **Do not mark Milestone 3.5c complete.** Production chat is not claimed ready.
 
 ## Immediate next step
 **Milestone 3.5b.2 is complete** on `main` (`055fb57`). Remaining Milestone 3 work is owner spend — do **not** start until the owner asks:
@@ -94,4 +94,4 @@ Editable Hatchling install may have a `.pth` file in `apps/api/.venv/lib/python3
 - If troubleshooting becomes unrelated, record it as a separate issue and return to the milestone.
 
 ## Suggested opening message for a new chat
-"We are continuing my Personal Command Center project. Read `docs/HANDOFF.md` first. Auth through M3.4, Render ADR (M3.5a), deploy prep (M3.5b), production predeployment verification (M3.5b.1, PR #9 / `4d8870f`), and application-path verification (M3.5b.2, PR #11 / `055fb57`) are on `main`. Next is owner Render provisioning (M3.5c) per `docs/deploy/render-runbook.md` — do not buy/apply Blueprint unless I ask. Give me one precise step at a time."
+"We are continuing my Personal Command Center project. Read `docs/HANDOFF.md` first. Auth through M3.4, Render ADR (M3.5a), deploy prep (M3.5b / M3.5b.1–b.2), and Phase 1A.2 chat (PR1–PR5 + ADR 0005) are on `main`. Keep one non-overlapping pcc-api for chat. Next is owner Render provisioning (M3.5c) per `docs/deploy/render-runbook.md` — do not buy/apply Blueprint unless I ask. Give me one precise step at a time."
