@@ -1,8 +1,12 @@
 """In-process abort registry for in-flight chat runs (Phase 1A.2 PR3).
 
 Cancel route and streaming generator share a ``threading.Event`` per run id.
-Process-local is sufficient for the single-worker MVP; multi-worker would need
-a shared store later.
+
+**Single-worker assumption:** handles are process-local. Cross-worker cancel
+cannot signal another process's generator. Abandoned DB ``running`` rows
+(no local handle) are recovered by ``chat_recovery`` when
+``pcc_chat_assume_single_worker`` is true. Do not scale ``pcc-api`` above one
+instance until a shared abort/lease mechanism exists.
 """
 
 from __future__ import annotations

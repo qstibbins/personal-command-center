@@ -20,13 +20,19 @@ from pcc.db import session as db_session
 from pcc.db.models import ChatRun, Conversation, Message, MessageUsage
 from pcc.providers.base import ChatMessageDTO, StreamEvent, UsageInfo
 from pcc.providers.registry import get_provider
-from pcc.services.chat_abort import register_run, unregister_run
+from pcc.services.chat_abort import register_run, request_cancel, unregister_run
 from pcc.services.chat_conversations import ChatNotFoundError, get_conversation
 from pcc.services.chat_ownership import normalize_owner_email
+from pcc.services.chat_recovery import (
+    finalize_abandoned_run,
+    is_locally_active,
+    recover_abandoned_runs_locked,
+)
 
 logger = logging.getLogger(__name__)
 
 TITLE_MAX = 300
+RUNNING_UNIQUE_INDEX = "uq_chat_runs_one_running_per_conversation"
 
 
 def _session_factory():
@@ -69,8 +75,8 @@ def claim_turn(
     content: str,
     session_factory=None,
 ) -> ClaimResult:
-    session_factory = session_factory or _session_factory()
     """Lock conversation, allocate sequences, insert user + assistant + running run."""
+    session_factory = session_factory or _session_factory()
     owner = normalize_owner_email(owner_email)
     with session_factory() as db:
         try:
@@ -88,6 +94,9 @@ def claim_turn(
             )
             if conversation is None:
                 raise ChatNotFoundError("Conversation not found")
+
+            # Crash leftovers: running + no local handle → recover, then claim.
+            recover_abandoned_runs_locked(db, conversation_id=conversation_id)
 
             existing = db.scalar(
                 select(ChatRun.id).where(
@@ -145,8 +154,10 @@ def claim_turn(
             db.commit()
         except IntegrityError as exc:
             db.rollback()
-            # Partial unique on running runs is the hard guarantee.
-            raise RunInProgressError("A reply is already in progress") from exc
+            if _is_running_unique_violation(exc):
+                raise RunInProgressError("A reply is already in progress") from exc
+            logger.exception("Unexpected integrity error during chat claim")
+            raise
 
         register_run(run.id)
         return ClaimResult(
@@ -359,10 +370,12 @@ def cancel_run(
     owner_email: str,
     session_factory=None,
 ) -> ChatRun:
-    session_factory = session_factory or _session_factory()
-    """Request cancel for an in-flight run; idempotent if already terminal."""
-    from pcc.services.chat_abort import request_cancel
+    """Request cancel for an in-flight run; idempotent if already terminal.
 
+    If the run is ``running`` but has no local abort handle (abandoned after
+    crash), finalize it immediately under the single-worker assumption.
+    """
+    session_factory = session_factory or _session_factory()
     owner = normalize_owner_email(owner_email)
     with session_factory() as db:
         run = db.get(ChatRun, run_id)
@@ -372,9 +385,28 @@ def cancel_run(
         if run.status != "running":
             return run
 
-        request_cancel(run_id, reason="client_stop")
+        if is_locally_active(run_id):
+            request_cancel(run_id, reason="client_stop")
+            db.refresh(run)
+            return run
+
+        # No local generator: recover abandoned row so cancel is effective.
+        finalize_abandoned_run(
+            db,
+            run,
+            cancel_reason="client_stop",
+            error_message="Cancelled after abandoned run recovery",
+        )
+        db.commit()
         db.refresh(run)
         return run
+
+
+def _is_running_unique_violation(exc: IntegrityError) -> bool:
+    message = str(getattr(exc, "orig", exc)).lower()
+    return RUNNING_UNIQUE_INDEX.lower() in message or (
+        "chat_runs" in message and "running" in message
+    )
 
 
 def _allocate_sequence(db: Session, conversation_id: uuid.UUID) -> int:

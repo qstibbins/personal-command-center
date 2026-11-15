@@ -41,6 +41,7 @@ from pcc.services.chat_orchestrator import (
     iter_sse_for_claim,
 )
 from pcc.services.chat_ownership import normalize_owner_email
+from pcc.services.chat_recovery import ActiveRunError
 
 router = APIRouter(prefix="/api/v1/chat", tags=["chat"])
 
@@ -147,6 +148,14 @@ def delete_conversation(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "not_found", "message": str(exc)},
+        ) from exc
+    except ActiveRunError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "run_in_progress",
+                "message": str(exc) or "Cannot delete while a reply is in progress",
+            },
         ) from exc
 
 

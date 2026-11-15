@@ -64,12 +64,15 @@ services:
     dockerContext: ./apps/api
     # Single migration owner — do not also migrate from the web service.
     # Failure cancels the new deploy; the previous API instance keeps serving.
+    # Keep a single instance: chat abort/recovery is process-local (Phase 1A).
     preDeployCommand: alembic upgrade head
     envVars:
       - key: PCC_ENV
         value: production
       - key: PCC_SERVICE_CREDENTIAL
         generateValue: true
+      - key: PCC_CHAT_ASSUME_SINGLE_WORKER
+        value: "true"
       - key: DATABASE_URL
         fromDatabase:
           name: pcc-db

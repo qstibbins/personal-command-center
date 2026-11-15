@@ -94,8 +94,8 @@ The browser never talks to FastAPI directly. All API calls originate from the Ne
 | `POST /api/v1/api-tokens/{id}/revoke` | Service credential only. Sets `revoked_at`; idempotent if already revoked. |
 | `GET/POST /api/v1/chat/conversations` | Service principal + `chat:read`/`chat:write`. Owner required (`owner_email` query/body). |
 | `GET/PATCH/DELETE /api/v1/chat/conversations/{id}` | Owner-scoped metadata, archive, soft delete. |
-| `GET/POST …/messages` | History (JSON) or send + SSE mock stream; **409** `run_in_progress` if a run is active. |
-| `POST /api/v1/chat/runs/{run_id}/cancel` | Idempotent abort; finalize to `partial` + `cancelled`. |
+| `GET/POST …/messages` | History (JSON) or send + SSE mock stream; **409** `run_in_progress` if a run is active. Soft-delete also **409** while live. |
+| `POST /api/v1/chat/runs/{run_id}/cancel` | Idempotent abort; finalize to `partial` + `cancelled`. Abandoned runs (no local handle) finalize under single-worker recovery. |
 
 OpenAPI docs (`/docs`, `/redoc`, `/openapi.json`) are served only when `PCC_ENV` is not `production`. In production they return 404. Calling protected endpoints from `/docs` in non-production still requires a Bearer token.
 

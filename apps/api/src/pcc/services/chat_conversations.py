@@ -8,9 +8,10 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from pcc.db.models import Conversation, Message
+from pcc.db.models import ChatRun, Conversation, Message
 from pcc.schemas.chat import ConversationCreate, ConversationUpdate
 from pcc.services.chat_ownership import normalize_owner_email, owner_email_equals
+from pcc.services.chat_recovery import ActiveRunError, recover_abandoned_runs_locked
 
 
 class ChatNotFoundError(Exception):
@@ -98,11 +99,42 @@ def soft_delete_conversation(
     conversation_id: uuid.UUID,
     owner_email: str,
 ) -> Conversation:
-    conversation = get_conversation(
-        db,
-        conversation_id=conversation_id,
-        owner_email=owner_email,
+    """Soft-delete under row lock; refuse while a live run is active (HTTP 409).
+
+    Abandoned (no local abort handle) running rows are recovered first so a
+    crash cannot permanently block deletion under the single-worker assumption.
+    """
+    owner = normalize_owner_email(owner_email)
+    conversation = (
+        db.execute(
+            select(Conversation)
+            .where(
+                Conversation.id == conversation_id,
+                Conversation.owner_email == owner,
+                Conversation.status != "deleted",
+            )
+            .with_for_update()
+        )
+        .scalar_one_or_none()
     )
+    if conversation is None:
+        raise ChatNotFoundError("Conversation not found")
+
+    # Finalize crash leftovers before testing for a live stream.
+    recover_abandoned_runs_locked(db, conversation_id=conversation_id)
+
+    live_run_id = db.scalar(
+        select(ChatRun.id).where(
+            ChatRun.conversation_id == conversation_id,
+            ChatRun.status == "running",
+        )
+    )
+    if live_run_id is not None:
+        # Remaining running rows are locally active (or recovery disabled).
+        raise ActiveRunError(
+            "Cannot delete conversation while a reply is in progress"
+        )
+
     conversation.status = "deleted"
     conversation.deleted_at = datetime.now(UTC)
     conversation.updated_at = datetime.now(UTC)

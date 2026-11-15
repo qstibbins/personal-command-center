@@ -11,7 +11,7 @@ from sqlalchemy import select
 
 from pcc.auth.token_crypto import hash_api_token
 from pcc.db import session as db_session
-from pcc.db.models import ApiToken, ChatRun, Message
+from pcc.db.models import ApiToken, ChatRun, Conversation, Message
 
 OWNER = "owner@example.com"
 OTHER = "other@example.com"
@@ -147,14 +147,17 @@ def test_message_stream_completed_and_ordering(db_client):
 
 
 def test_concurrent_run_returns_409(db_client):
+    from pcc.services.chat_abort import register_run, unregister_run
+
     conv = _create_conversation(db_client)
     conv_id = uuid.UUID(conv["id"])
+    run_id = uuid.uuid4()
 
-    # Insert a stuck running run to simulate an in-flight stream.
+    # Simulate a live in-process stream (local abort handle present).
     with db_session.SessionLocal() as session:
         session.add(
             ChatRun(
-                id=uuid.uuid4(),
+                id=run_id,
                 conversation_id=conv_id,
                 owner_email=OWNER,
                 status="running",
@@ -163,14 +166,17 @@ def test_concurrent_run_returns_409(db_client):
             )
         )
         session.commit()
-
-    conflict = db_client.post(
-        f"/api/v1/chat/conversations/{conv_id}/messages",
-        json={"owner_email": OWNER, "content": "second"},
-    )
-    assert conflict.status_code == 409
-    detail = conflict.json()["detail"]
-    assert detail["code"] == "run_in_progress"
+    register_run(run_id)
+    try:
+        conflict = db_client.post(
+            f"/api/v1/chat/conversations/{conv_id}/messages",
+            json={"owner_email": OWNER, "content": "second"},
+        )
+        assert conflict.status_code == 409
+        detail = conflict.json()["detail"]
+        assert detail["code"] == "run_in_progress"
+    finally:
+        unregister_run(run_id)
 
 
 def test_provider_error_persists_failed(db_client):
@@ -444,3 +450,351 @@ def test_disconnect_finalize_releases_running_run(db_client):
         assert message is not None
         assert message.status == "partial"
         assert session.scalar(select(ChatRun).where(ChatRun.status == "running")) is None
+
+
+def test_soft_delete_rejects_active_run(db_client):
+    from pcc.services.chat_abort import register_run, unregister_run
+
+    conv = _create_conversation(db_client)
+    conv_id = uuid.UUID(conv["id"])
+    run_id = uuid.uuid4()
+    assistant_id = uuid.uuid4()
+
+    with db_session.SessionLocal() as session:
+        session.add(
+            Message(
+                id=assistant_id,
+                conversation_id=conv_id,
+                owner_email=OWNER,
+                role="assistant",
+                status="streaming",
+                content_text="",
+                sequence=1,
+            )
+        )
+        session.add(
+            ChatRun(
+                id=run_id,
+                conversation_id=conv_id,
+                owner_email=OWNER,
+                status="running",
+                provider="mock",
+                model="mock-echo-v1",
+                response_message_id=assistant_id,
+            )
+        )
+        session.commit()
+    register_run(run_id)
+    try:
+        denied = db_client.request(
+            "DELETE",
+            f"/api/v1/chat/conversations/{conv_id}",
+            json={"owner_email": OWNER},
+        )
+        assert denied.status_code == 409
+        assert denied.json()["detail"]["code"] == "run_in_progress"
+    finally:
+        unregister_run(run_id)
+
+
+def test_soft_delete_succeeds_after_completion(db_client):
+    conv = _create_conversation(db_client)
+    conv_id = conv["id"]
+    with db_client.stream(
+        "POST",
+        f"/api/v1/chat/conversations/{conv_id}/messages",
+        json={"owner_email": OWNER, "content": "done"},
+    ) as response:
+        "".join(response.iter_text())
+
+    deleted = db_client.request(
+        "DELETE",
+        f"/api/v1/chat/conversations/{conv_id}",
+        json={"owner_email": OWNER},
+    )
+    assert deleted.status_code == 200
+    assert deleted.json()["status"] == "deleted"
+
+
+def test_soft_delete_recovers_abandoned_run_then_deletes(db_client):
+    """Running without a local handle is abandoned → recover → delete allowed."""
+    conv = _create_conversation(db_client)
+    conv_id = uuid.UUID(conv["id"])
+    run_id = uuid.uuid4()
+    assistant_id = uuid.uuid4()
+
+    with db_session.SessionLocal() as session:
+        session.add(
+            Message(
+                id=assistant_id,
+                conversation_id=conv_id,
+                owner_email=OWNER,
+                role="assistant",
+                status="streaming",
+                content_text="",
+                sequence=1,
+            )
+        )
+        session.add(
+            ChatRun(
+                id=run_id,
+                conversation_id=conv_id,
+                owner_email=OWNER,
+                status="running",
+                provider="mock",
+                model="mock-echo-v1",
+                response_message_id=assistant_id,
+            )
+        )
+        session.commit()
+
+    deleted = db_client.request(
+        "DELETE",
+        f"/api/v1/chat/conversations/{conv_id}",
+        json={"owner_email": OWNER},
+    )
+    assert deleted.status_code == 200
+    assert deleted.json()["status"] == "deleted"
+
+    with db_session.SessionLocal() as session:
+        run = session.get(ChatRun, run_id)
+        assert run is not None
+        assert run.status == "cancelled"
+        assert run.cancel_reason == "superseded"
+        message = session.get(Message, assistant_id)
+        assert message is not None
+        assert message.status == "partial"
+
+
+def test_claim_recovers_abandoned_run_then_streams(db_client):
+    conv = _create_conversation(db_client)
+    conv_id = uuid.UUID(conv["id"])
+    stuck_run_id = uuid.uuid4()
+    stuck_assistant = uuid.uuid4()
+
+    with db_session.SessionLocal() as session:
+        session.add(
+            Message(
+                id=stuck_assistant,
+                conversation_id=conv_id,
+                owner_email=OWNER,
+                role="assistant",
+                status="streaming",
+                content_text="",
+                sequence=1,
+            )
+        )
+        session.add(
+            ChatRun(
+                id=stuck_run_id,
+                conversation_id=conv_id,
+                owner_email=OWNER,
+                status="running",
+                provider="mock",
+                model="mock-echo-v1",
+                response_message_id=stuck_assistant,
+            )
+        )
+        # next_sequence must be past the stuck assistant sequence
+        conversation = session.get(Conversation, conv_id)
+        assert conversation is not None
+        conversation.next_sequence = 2
+        session.commit()
+
+    with db_client.stream(
+        "POST",
+        f"/api/v1/chat/conversations/{conv_id}/messages",
+        json={"owner_email": OWNER, "content": "after recovery"},
+    ) as response:
+        assert response.status_code == 200
+        body = "".join(response.iter_text())
+    assert "message_end" in body or "content_delta" in body
+
+    with db_session.SessionLocal() as session:
+        stuck = session.get(ChatRun, stuck_run_id)
+        assert stuck.status == "cancelled"
+        assert stuck.cancel_reason == "superseded"
+        assert session.scalar(select(ChatRun).where(ChatRun.status == "running")) is None
+
+
+def test_recovery_does_not_steal_locally_active_run(db_client):
+    from pcc.services.chat_abort import register_run, unregister_run
+    from pcc.services.chat_recovery import recover_abandoned_runs_locked
+
+    conv = _create_conversation(db_client)
+    conv_id = uuid.UUID(conv["id"])
+    run_id = uuid.uuid4()
+
+    with db_session.SessionLocal() as session:
+        session.add(
+            ChatRun(
+                id=run_id,
+                conversation_id=conv_id,
+                owner_email=OWNER,
+                status="running",
+                provider="mock",
+                model="mock-echo-v1",
+            )
+        )
+        session.commit()
+
+    register_run(run_id)
+    try:
+        with db_session.SessionLocal() as session:
+            session.execute(
+                select(Conversation)
+                .where(Conversation.id == conv_id)
+                .with_for_update()
+            )
+            recovered = recover_abandoned_runs_locked(db=session, conversation_id=conv_id)
+            session.commit()
+            assert recovered == []
+            run = session.get(ChatRun, run_id)
+            assert run is not None
+            assert run.status == "running"
+    finally:
+        unregister_run(run_id)
+
+
+def test_startup_recovery_finalizes_abandoned_runs(db_client):
+    from pcc.services.chat_recovery import recover_all_abandoned_running_runs
+
+    conv = _create_conversation(db_client)
+    conv_id = uuid.UUID(conv["id"])
+    run_id = uuid.uuid4()
+    assistant_id = uuid.uuid4()
+
+    with db_session.SessionLocal() as session:
+        session.add(
+            Message(
+                id=assistant_id,
+                conversation_id=conv_id,
+                owner_email=OWNER,
+                role="assistant",
+                status="streaming",
+                content_text="",
+                sequence=1,
+            )
+        )
+        session.add(
+            ChatRun(
+                id=run_id,
+                conversation_id=conv_id,
+                owner_email=OWNER,
+                status="running",
+                provider="mock",
+                model="mock-echo-v1",
+                response_message_id=assistant_id,
+            )
+        )
+        session.commit()
+
+    recovered = recover_all_abandoned_running_runs()
+    assert run_id in recovered
+
+    with db_session.SessionLocal() as session:
+        run = session.get(ChatRun, run_id)
+        assert run.status == "cancelled"
+        assert run.cancel_reason == "superseded"
+        assert session.get(Message, assistant_id).status == "partial"
+        # Conversation row still exists and is not deleted by recovery
+        assert session.get(Conversation, conv_id).status == "active"
+
+
+def test_concurrent_delete_while_send_returns_409(db_client):
+    """While a locally active stream holds the running row, delete is 409."""
+    from pcc.services.chat_orchestrator import claim_turn, iter_sse_for_claim
+
+    conv = _create_conversation(db_client)
+    claim = claim_turn(
+        conversation_id=uuid.UUID(conv["id"]),
+        owner_email=OWNER,
+        content="MOCK:SLOW",
+    )
+    stream = iter_sse_for_claim(claim)
+    next(stream)  # start stream; abort handle registered
+
+    denied = db_client.request(
+        "DELETE",
+        f"/api/v1/chat/conversations/{conv['id']}",
+        json={"owner_email": OWNER},
+    )
+    assert denied.status_code == 409
+    assert denied.json()["detail"]["code"] == "run_in_progress"
+
+    # Second send also blocked while first is active
+    second = db_client.post(
+        f"/api/v1/chat/conversations/{conv['id']}/messages",
+        json={"owner_email": OWNER, "content": "nope"},
+    )
+    assert second.status_code == 409
+
+    stream.close()
+    # After disconnect finalize, delete succeeds
+    deleted = db_client.request(
+        "DELETE",
+        f"/api/v1/chat/conversations/{conv['id']}",
+        json={"owner_email": OWNER},
+    )
+    assert deleted.status_code == 200
+
+
+def test_cross_owner_cancel_returns_404(db_client):
+    conv = _create_conversation(db_client, owner=OWNER)
+    with db_client.stream(
+        "POST",
+        f"/api/v1/chat/conversations/{conv['id']}/messages",
+        json={"owner_email": OWNER, "content": "hi"},
+    ) as response:
+        "".join(response.iter_text())
+
+    with db_session.SessionLocal() as session:
+        run = session.scalar(select(ChatRun))
+        assert run is not None
+        run_id = run.id
+
+    denied = db_client.post(
+        f"/api/v1/chat/runs/{run_id}/cancel",
+        json={"owner_email": OTHER},
+    )
+    assert denied.status_code == 404
+
+
+def test_cancel_abandoned_run_finalizes(db_client):
+    conv = _create_conversation(db_client)
+    conv_id = uuid.UUID(conv["id"])
+    run_id = uuid.uuid4()
+    assistant_id = uuid.uuid4()
+
+    with db_session.SessionLocal() as session:
+        session.add(
+            Message(
+                id=assistant_id,
+                conversation_id=conv_id,
+                owner_email=OWNER,
+                role="assistant",
+                status="streaming",
+                content_text="",
+                sequence=1,
+            )
+        )
+        session.add(
+            ChatRun(
+                id=run_id,
+                conversation_id=conv_id,
+                owner_email=OWNER,
+                status="running",
+                provider="mock",
+                model="mock-echo-v1",
+                response_message_id=assistant_id,
+            )
+        )
+        session.commit()
+
+    cancelled = db_client.post(
+        f"/api/v1/chat/runs/{run_id}/cancel",
+        json={"owner_email": OWNER},
+    )
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+    assert cancelled.json()["cancel_reason"] == "client_stop"

@@ -17,6 +17,9 @@ class Settings(BaseSettings):
     pcc_env: str = "development"
     # Phase 1A chat default provider (mock requires no API keys).
     pcc_default_chat_provider: str = "mock"
+    # Chat abort registry is process-local. Abandoned-run recovery is only safe
+    # when a single API worker owns all in-flight streams (Render pserv: keep 1).
+    pcc_chat_assume_single_worker: bool = True
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @field_validator("database_url", mode="before")

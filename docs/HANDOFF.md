@@ -49,7 +49,7 @@ Build PCC as a persistent personal system of record: captures, knowledge, tasks,
   3. Capture-create assertion accepts HTTP `200` or `201` rather than the exact expected FastAPI create status (`201`) in `scripts/verify_web_api_client.mjs`.
 
 ## Phase 1A note (in progress; does not complete M3.5c)
-Phase 1A.1 architecture is finalized (provider-neutral chat). Phase 1A.2 **PR1–PR2** merged (schema + MockProvider). **PR3** adds conversation orchestration + FastAPI chat routes (CRUD, SSE stream, 409 `run_in_progress`, cancel/disconnect finalize). No Next.js BFF/UI yet. **Do not mark Milestone 3.5c complete.**
+Phase 1A.1 architecture is finalized (provider-neutral chat). Phase 1A.2 **PR1–PR2** merged (schema + MockProvider). **PR3** adds conversation orchestration + FastAPI chat routes (CRUD, SSE stream, 409 `run_in_progress`, cancel/disconnect finalize). Soft-delete refuses active runs; abandoned `running` rows recover via process-local liveness under **single-worker** `pcc-api` (`PCC_CHAT_ASSUME_SINGLE_WORKER`). No Next.js BFF/UI yet. **Do not mark Milestone 3.5c complete.**
 
 ## Immediate next step
 **Milestone 3.5b.2 is complete** on `main` (`055fb57`). Remaining Milestone 3 work is owner spend — do **not** start until the owner asks:
