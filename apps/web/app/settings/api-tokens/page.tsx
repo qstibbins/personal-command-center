@@ -25,6 +25,7 @@ export default async function ApiTokensSettingsPage() {
         <p className="eyebrow">PERSONAL COMMAND CENTER · V0.1</p>
         <div className="session-meta">
           <Link href="/">Inbox</Link>
+          <Link href="/chat">Chat</Link>
           <span className="muted">{email}</span>
           <SignOutButton signOutAction={signOutAction} />
         </div>
