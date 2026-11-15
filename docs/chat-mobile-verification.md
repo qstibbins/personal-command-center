@@ -18,7 +18,7 @@ The following items require a **real iPhone Safari or iOS Simulator** check
 | Check | Expected |
 |---|---|
 | Safe-area (home indicator) | Composer sits above the home indicator; bottom padding uses `env(safe-area-inset-bottom)`. |
-| Dynamic viewport (`dvh`) | Chat shell fills the visible viewport; composer is not trapped under Safari chrome. |
+| Dynamic viewport (`dvh`) | Chat shell fills the visible viewport; CSS declares `100vh` then `100dvh` so supporting browsers prefer dynamic height; composer is not trapped under Safari chrome. |
 | Composer font size | Textarea renders at ≥16px; focusing it does **not** trigger iOS page zoom. |
 | Keyboard — focus | Focusing the composer keeps the latest message and input visible (scroll into view). |
 | Keyboard — send | After send, the new turn remains visible above the keyboard. |

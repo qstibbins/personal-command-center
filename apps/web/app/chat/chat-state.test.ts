@@ -6,6 +6,7 @@ import {
   canSend,
   chatReducer,
   createInitialChatState,
+  isActiveStream,
   makeTempIds,
 } from "./chat-state";
 import type { ChatMessage, Conversation } from "./chat-types";
@@ -191,18 +192,22 @@ describe("streaming content updates", () => {
     });
     expect(canSend(state)).toBe(true);
     const ids = makeTempIds(state.localSeq);
+    const streamId = "stream-1";
     state = chatReducer(state, {
       type: "send/begin",
       conversationId: "conv-a",
+      streamId,
       content: "Hello",
       tempUserId: ids.tempUserId,
       tempAssistantId: ids.tempAssistantId,
     });
     expect(state.streamPhase).toBe("sending");
+    expect(state.activeStreamId).toBe(streamId);
     expect(canSend(state)).toBe(false);
 
     state = chatReducer(state, {
       type: "send/stream-event",
+      streamId,
       event: {
         event: "message_start",
         data: { run_id: "run-1", message_id: "asst-real", role: "assistant" },
@@ -213,6 +218,7 @@ describe("streaming content updates", () => {
 
     state = chatReducer(state, {
       type: "send/stream-event",
+      streamId,
       event: {
         event: "content_delta",
         data: { message_id: "asst-real", delta: "Hel" },
@@ -220,6 +226,7 @@ describe("streaming content updates", () => {
     });
     state = chatReducer(state, {
       type: "send/stream-event",
+      streamId,
       event: {
         event: "content_delta",
         data: { message_id: "asst-real", delta: "lo" },
@@ -231,12 +238,14 @@ describe("streaming content updates", () => {
 
     state = chatReducer(state, {
       type: "send/stream-event",
+      streamId,
       event: {
         event: "message_end",
         data: { message_id: "asst-real", status: "complete", finish_reason: "stop" },
       },
     });
     expect(state.streamPhase).toBe("idle");
+    expect(state.activeStreamId).toBeNull();
     expect(state.messages.at(-1)?.status).toBe("complete");
   });
 });
@@ -249,6 +258,8 @@ describe("stop generation", () => {
       streamPhase: "streaming",
       activeRunId: "run-1",
       streamingMessageId: "asst-1",
+      activeStreamId: "stream-stop",
+      activeStreamConversationId: "conv-a",
       messages: [
         msg({ id: "u1", role: "user", sequence: 1, content_text: "Hi" }),
         msg({
@@ -260,9 +271,16 @@ describe("stop generation", () => {
         }),
       ],
     });
-    state = chatReducer(state, { type: "send/stop-requested" });
+    state = chatReducer(state, {
+      type: "send/stop-requested",
+      streamId: "stream-stop",
+    });
     expect(state.streamPhase).toBe("stopping");
-    state = chatReducer(state, { type: "send/finished", outcome: "aborted" });
+    state = chatReducer(state, {
+      type: "send/finished",
+      streamId: "stream-stop",
+      outcome: "aborted",
+    });
     expect(state.streamPhase).toBe("idle");
     expect(state.messages.at(-1)?.status).toBe("partial");
     expect(state.messages.at(-1)?.content_text).toBe("Hel");
@@ -276,6 +294,8 @@ describe("duplicate-send prevention", () => {
       messagesStatus: "ready",
       streamPhase: "streaming",
       streamingMessageId: "asst-1",
+      activeStreamId: "stream-live",
+      activeStreamConversationId: "conv-a",
       messages: [
         msg({
           id: "asst-1",
@@ -291,11 +311,13 @@ describe("duplicate-send prevention", () => {
     state = chatReducer(state, {
       type: "send/begin",
       conversationId: "conv-a",
+      streamId: "stream-dup",
       content: "again",
       tempUserId: "local-user-99",
       tempAssistantId: "local-assistant-99",
     });
     expect(state.messages).toHaveLength(before);
+    expect(state.activeStreamId).toBe("stream-live");
   });
 });
 
@@ -305,6 +327,8 @@ describe("partial and failed messages", () => {
       activeConversationId: "conv-a",
       streamPhase: "streaming",
       streamingMessageId: "asst-1",
+      activeStreamId: "stream-err",
+      activeStreamConversationId: "conv-a",
       messages: [
         msg({
           id: "asst-1",
@@ -318,6 +342,7 @@ describe("partial and failed messages", () => {
     });
     state = chatReducer(state, {
       type: "send/stream-event",
+      streamId: "stream-err",
       event: {
         event: "error",
         data: {
@@ -338,6 +363,8 @@ describe("partial and failed messages", () => {
       activeConversationId: "conv-a",
       streamPhase: "streaming",
       streamingMessageId: "asst-1",
+      activeStreamId: "stream-partial",
+      activeStreamConversationId: "conv-a",
       messages: [
         msg({
           id: "asst-1",
@@ -351,6 +378,7 @@ describe("partial and failed messages", () => {
     });
     state = chatReducer(state, {
       type: "send/stream-event",
+      streamId: "stream-partial",
       event: {
         event: "error",
         data: {
@@ -376,6 +404,7 @@ describe("409 conflict behavior", () => {
     state = chatReducer(state, {
       type: "send/begin",
       conversationId: "conv-a",
+      streamId: "stream-409",
       content: "Hello",
       tempUserId: ids.tempUserId,
       tempAssistantId: ids.tempAssistantId,
@@ -384,6 +413,7 @@ describe("409 conflict behavior", () => {
 
     state = chatReducer(state, {
       type: "send/http-error",
+      streamId: "stream-409",
       status: 409,
       code: "run_in_progress",
       message: "Reply already in progress",
@@ -440,5 +470,251 @@ describe("empty / loading / error states", () => {
     });
     expect(state.messages).toHaveLength(0);
     expect(canSend(state)).toBe(true);
+  });
+});
+
+describe("stale stream isolation after conversation switch", () => {
+  function beginStream(
+    conversationId: string,
+    streamId: string,
+    content = "Hello",
+  ) {
+    let state = createInitialChatState({
+      conversations: [CONV_A, CONV_B],
+      conversationsStatus: "ready",
+      activeConversationId: conversationId,
+      messagesStatus: "ready",
+    });
+    const ids = makeTempIds(state.localSeq);
+    state = chatReducer(state, {
+      type: "send/begin",
+      conversationId,
+      streamId,
+      content,
+      tempUserId: ids.tempUserId,
+      tempAssistantId: ids.tempAssistantId,
+    });
+    return { state, ids, streamId };
+  }
+
+  it("A: ignores old content_delta after switching conversations", () => {
+    const started = beginStream("conv-a", "stream-old");
+    let state = started.state;
+    state = chatReducer(state, {
+      type: "send/stream-event",
+      streamId: started.streamId,
+      event: {
+        event: "message_start",
+        data: { run_id: "run-old", message_id: "asst-old", role: "assistant" },
+      },
+    });
+    state = chatReducer(state, {
+      type: "conversation/select",
+      conversationId: "conv-b",
+    });
+    expect(state.activeStreamId).toBeNull();
+    expect(state.streamPhase).toBe("idle");
+    expect(canSend({ ...state, messagesStatus: "ready" })).toBe(true);
+
+    const before = state;
+    state = chatReducer(state, {
+      type: "send/stream-event",
+      streamId: "stream-old",
+      event: {
+        event: "content_delta",
+        data: { message_id: "asst-old", delta: "stale" },
+      },
+    });
+    expect(state.streamPhase).toBe("idle");
+    expect(state.activeStreamId).toBeNull();
+    expect(state.messages).toEqual(before.messages);
+    expect(isActiveStream(state, "stream-old")).toBe(false);
+  });
+
+  it("B: ignores old message_start / message_end after switching", () => {
+    const started = beginStream("conv-a", "stream-old");
+    let state = chatReducer(started.state, {
+      type: "conversation/select",
+      conversationId: "conv-b",
+    });
+
+    state = chatReducer(state, {
+      type: "send/stream-event",
+      streamId: "stream-old",
+      event: {
+        event: "message_start",
+        data: { run_id: "run-old", message_id: "asst-old", role: "assistant" },
+      },
+    });
+    expect(state.streamPhase).toBe("idle");
+    expect(state.activeRunId).toBeNull();
+
+    state = chatReducer(state, {
+      type: "send/stream-event",
+      streamId: "stream-old",
+      event: {
+        event: "message_end",
+        data: { message_id: "asst-old", status: "complete" },
+      },
+    });
+    expect(state.streamPhase).toBe("idle");
+    expect(state.messages).toEqual([]);
+  });
+
+  it("C: ignores old send/finished after a new conversation is active", () => {
+    const started = beginStream("conv-a", "stream-old");
+    let state = chatReducer(started.state, {
+      type: "conversation/select",
+      conversationId: "conv-b",
+    });
+    state = chatReducer(state, {
+      type: "messages/loaded",
+      conversationId: "conv-b",
+      messages: [
+        msg({
+          id: "b1",
+          role: "user",
+          sequence: 1,
+          content_text: "prior",
+          conversation_id: "conv-b",
+        }),
+      ],
+    });
+    expect(canSend(state)).toBe(true);
+
+    state = chatReducer(state, {
+      type: "send/finished",
+      streamId: "stream-old",
+      outcome: "aborted",
+    });
+    expect(state.streamPhase).toBe("idle");
+    expect(state.messages.map((m) => m.id)).toEqual(["b1"]);
+    expect(canSend(state)).toBe(true);
+  });
+
+  it("D: old abort/finished cannot clear a newer active send", () => {
+    const first = beginStream("conv-a", "stream-1");
+    let state = chatReducer(first.state, {
+      type: "conversation/select",
+      conversationId: "conv-b",
+    });
+    state = chatReducer(state, {
+      type: "messages/loaded",
+      conversationId: "conv-b",
+      messages: [],
+    });
+    const secondIds = makeTempIds(state.localSeq);
+    state = chatReducer(state, {
+      type: "send/begin",
+      conversationId: "conv-b",
+      streamId: "stream-2",
+      content: "new turn",
+      tempUserId: secondIds.tempUserId,
+      tempAssistantId: secondIds.tempAssistantId,
+    });
+    expect(state.activeStreamId).toBe("stream-2");
+    expect(state.streamPhase).toBe("sending");
+
+    state = chatReducer(state, {
+      type: "send/finished",
+      streamId: "stream-1",
+      outcome: "aborted",
+    });
+    expect(state.activeStreamId).toBe("stream-2");
+    expect(state.streamPhase).toBe("sending");
+    expect(canSend(state)).toBe(false);
+
+    state = chatReducer(state, {
+      type: "send/http-error",
+      streamId: "stream-1",
+      status: 0,
+      code: "network_error",
+      message: "stale",
+    });
+    expect(state.activeStreamId).toBe("stream-2");
+    expect(state.streamPhase).toBe("sending");
+  });
+
+  it("E: switch away and back keeps Send usable without duplicating history", () => {
+    const started = beginStream("conv-a", "stream-old");
+    let state = chatReducer(started.state, {
+      type: "conversation/select",
+      conversationId: "conv-b",
+    });
+    state = chatReducer(state, {
+      type: "conversation/select",
+      conversationId: "conv-a",
+    });
+    const history = [
+      msg({ id: "u1", role: "user", sequence: 1, content_text: "Hello" }),
+      msg({
+        id: "a1",
+        role: "assistant",
+        sequence: 2,
+        status: "partial",
+        content_text: "Hel",
+      }),
+    ];
+    state = chatReducer(state, {
+      type: "messages/loaded",
+      conversationId: "conv-a",
+      messages: history,
+    });
+    expect(state.messages).toHaveLength(2);
+    expect(state.streamPhase).toBe("idle");
+    expect(canSend(state)).toBe(true);
+
+    // Stale reconcile for another conversation must not clobber.
+    state = chatReducer(state, {
+      type: "history/reconcile",
+      conversationId: "conv-b",
+      messages: [
+        msg({
+          id: "other",
+          role: "user",
+          sequence: 1,
+          content_text: "nope",
+          conversation_id: "conv-b",
+        }),
+      ],
+    });
+    expect(state.messages.map((m) => m.id)).toEqual(["u1", "a1"]);
+  });
+
+  it("F: active stream still updates and duplicate sends stay blocked", () => {
+    const started = beginStream("conv-a", "stream-live");
+    let state = started.state;
+    state = chatReducer(state, {
+      type: "send/stream-event",
+      streamId: "stream-live",
+      event: {
+        event: "message_start",
+        data: { run_id: "run-live", message_id: "asst-live", role: "assistant" },
+      },
+    });
+    state = chatReducer(state, {
+      type: "send/stream-event",
+      streamId: "stream-live",
+      event: {
+        event: "content_delta",
+        data: { message_id: "asst-live", delta: "OK" },
+      },
+    });
+    expect(state.messages.find((m) => m.id === "asst-live")?.content_text).toBe(
+      "OK",
+    );
+    expect(canSend(state)).toBe(false);
+
+    const beforeLen = state.messages.length;
+    state = chatReducer(state, {
+      type: "send/begin",
+      conversationId: "conv-a",
+      streamId: "stream-dup",
+      content: "nope",
+      tempUserId: "local-user-dup",
+      tempAssistantId: "local-assistant-dup",
+    });
+    expect(state.messages).toHaveLength(beforeLen);
+    expect(state.activeStreamId).toBe("stream-live");
   });
 });

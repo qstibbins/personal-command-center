@@ -61,6 +61,10 @@ export type ChatUiState = {
   streamPhase: StreamPhase;
   activeRunId: string | null;
   streamingMessageId: string | null;
+  /** Opaque id for the in-flight send; late events from older sends are ignored. */
+  activeStreamId: string | null;
+  /** Conversation that owns activeStreamId (may differ briefly during teardown). */
+  activeStreamConversationId: string | null;
   banner: ChatBanner | null;
   /** Monotonic client seq for optimistic user rows before server ids arrive. */
   localSeq: number;

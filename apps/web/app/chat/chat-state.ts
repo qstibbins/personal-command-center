@@ -10,7 +10,6 @@ import type {
   ChatUiState,
   Conversation,
   ParsedSseEvent,
-  StreamPhase,
 } from "./chat-types";
 
 export function createInitialChatState(
@@ -27,9 +26,38 @@ export function createInitialChatState(
     streamPhase: "idle",
     activeRunId: null,
     streamingMessageId: null,
+    activeStreamId: null,
+    activeStreamConversationId: null,
     banner: null,
     localSeq: 0,
     ...partial,
+  };
+}
+
+/** True when action streamId still owns the in-flight send. */
+export function isActiveStream(
+  state: ChatUiState,
+  streamId: string | null | undefined,
+): boolean {
+  return Boolean(streamId) && state.activeStreamId === streamId;
+}
+
+function clearStreamOwnership(
+  state: ChatUiState,
+): Pick<
+  ChatUiState,
+  | "streamPhase"
+  | "activeRunId"
+  | "streamingMessageId"
+  | "activeStreamId"
+  | "activeStreamConversationId"
+> {
+  return {
+    streamPhase: "idle",
+    activeRunId: null,
+    streamingMessageId: null,
+    activeStreamId: null,
+    activeStreamConversationId: null,
   };
 }
 
@@ -55,23 +83,34 @@ export type ChatAction =
   | {
       type: "send/begin";
       conversationId: string;
+      streamId: string;
       content: string;
       tempUserId: string;
       tempAssistantId: string;
     }
-  | { type: "send/stream-event"; event: ParsedSseEvent }
+  | {
+      type: "send/stream-event";
+      streamId: string;
+      event: ParsedSseEvent;
+    }
   | {
       type: "send/http-error";
+      streamId: string;
       status: number;
       code: string;
       message: string;
     }
-  | { type: "send/stop-requested" }
+  | { type: "send/stop-requested"; streamId: string }
   | {
       type: "send/finished";
+      streamId: string;
       outcome: "completed" | "aborted" | "interrupted" | "failed";
     }
-  | { type: "history/reconcile"; messages: ChatMessage[] };
+  | {
+      type: "history/reconcile";
+      conversationId: string;
+      messages: ChatMessage[];
+    };
 
 export function canSend(state: ChatUiState): boolean {
   return (
@@ -109,6 +148,7 @@ export function chatReducer(state: ChatUiState, action: ChatAction): ChatUiState
       ]);
       return {
         ...state,
+        ...clearStreamOwnership(state),
         conversations,
         conversationsStatus: "ready",
         conversationsError: null,
@@ -132,14 +172,12 @@ export function chatReducer(state: ChatUiState, action: ChatAction): ChatUiState
       }
       return {
         ...state,
+        ...clearStreamOwnership(state),
         activeConversationId: action.conversationId,
         messages: [],
         messagesStatus: action.conversationId ? "loading" : "idle",
         messagesError: null,
         banner: null,
-        streamPhase: "idle",
-        activeRunId: null,
-        streamingMessageId: null,
       };
     case "messages/loading":
       if (action.conversationId !== state.activeConversationId) return state;
@@ -179,6 +217,7 @@ export function chatReducer(state: ChatUiState, action: ChatAction): ChatUiState
       if (!canSend(state) || state.activeConversationId !== action.conversationId) {
         return state;
       }
+      if (!action.streamId) return state;
       const now = new Date().toISOString();
       const nextSeq = state.localSeq + 1;
       const userMessage: ChatMessage = {
@@ -219,30 +258,41 @@ export function chatReducer(state: ChatUiState, action: ChatAction): ChatUiState
         streamPhase: "sending",
         activeRunId: null,
         streamingMessageId: action.tempAssistantId,
+        activeStreamId: action.streamId,
+        activeStreamConversationId: action.conversationId,
         banner: null,
         messages: [...state.messages, userMessage, assistantMessage],
       };
     }
     case "send/stream-event":
+      if (!isActiveStream(state, action.streamId)) return state;
+      // Late events must not mutate a different conversation's transcript.
+      if (
+        state.activeStreamConversationId &&
+        state.activeConversationId !== state.activeStreamConversationId
+      ) {
+        return state;
+      }
       return applyStreamEvent(state, action.event);
     case "send/http-error": {
+      if (!isActiveStream(state, action.streamId)) return state;
       const messages = removeOptimisticStreamingPair(state);
       const banner = bannerForHttpError(action.status, action.code, action.message);
       return {
         ...state,
+        ...clearStreamOwnership(state),
         messages,
-        streamPhase: "idle",
-        activeRunId: null,
-        streamingMessageId: null,
         banner,
       };
     }
     case "send/stop-requested":
+      if (!isActiveStream(state, action.streamId)) return state;
       if (state.streamPhase !== "sending" && state.streamPhase !== "streaming") {
         return state;
       }
       return { ...state, streamPhase: "stopping" };
     case "send/finished": {
+      if (!isActiveStream(state, action.streamId)) return state;
       const messages = state.messages.map((message) => {
         if (message.id !== state.streamingMessageId) return message;
         if (message.status !== "streaming") return message;
@@ -276,13 +326,12 @@ export function chatReducer(state: ChatUiState, action: ChatAction): ChatUiState
       });
       return {
         ...state,
+        ...clearStreamOwnership(state),
         messages,
-        streamPhase: "idle" as StreamPhase,
-        activeRunId: null,
-        streamingMessageId: null,
       };
     }
     case "history/reconcile":
+      if (action.conversationId !== state.activeConversationId) return state;
       return {
         ...state,
         messages: mergeMessagesById(action.messages, []),
@@ -351,10 +400,8 @@ function applyStreamEvent(state: ChatUiState, event: ParsedSseEvent): ChatUiStat
       });
       return {
         ...state,
+        ...clearStreamOwnership(state),
         messages,
-        streamPhase: "idle",
-        activeRunId: null,
-        streamingMessageId: null,
       };
     }
     case "error": {
@@ -375,10 +422,8 @@ function applyStreamEvent(state: ChatUiState, event: ParsedSseEvent): ChatUiStat
       });
       return {
         ...state,
+        ...clearStreamOwnership(state),
         messages,
-        streamPhase: "idle",
-        activeRunId: null,
-        streamingMessageId: null,
         banner: {
           kind: "error",
           code,

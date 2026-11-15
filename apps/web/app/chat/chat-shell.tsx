@@ -37,6 +37,12 @@ type ChatShellProps = {
   initialConversations?: Conversation[];
 };
 
+type ActiveSend = {
+  streamId: string;
+  conversationId: string;
+  controller: AbortController;
+};
+
 export function ChatShell({
   email,
   signOutAction,
@@ -59,8 +65,8 @@ export function ChatShell({
     initialConversationId ? "thread" : "list",
   );
 
-  const abortRef = useRef<AbortController | null>(null);
-  const sendLockRef = useRef(false);
+  const activeSendRef = useRef<ActiveSend | null>(null);
+  const streamSeqRef = useRef(0);
   const activeIdRef = useRef(state.activeConversationId);
   activeIdRef.current = state.activeConversationId;
 
@@ -110,20 +116,21 @@ export function ChatShell({
 
   useEffect(() => {
     return () => {
-      abortRef.current?.abort();
-      sendLockRef.current = false;
+      activeSendRef.current?.controller.abort();
+      activeSendRef.current = null;
     };
   }, []);
 
+  function invalidateActiveSend() {
+    const current = activeSendRef.current;
+    if (!current) return;
+    current.controller.abort();
+    activeSendRef.current = null;
+  }
+
   function navigateToConversation(conversationId: string | null) {
-    if (
-      conversationId !== activeIdRef.current &&
-      (state.streamPhase === "sending" ||
-        state.streamPhase === "streaming" ||
-        state.streamPhase === "stopping")
-    ) {
-      abortRef.current?.abort();
-      sendLockRef.current = false;
+    if (conversationId !== activeIdRef.current) {
+      invalidateActiveSend();
     }
     dispatch({ type: "conversation/select", conversationId });
     setMobilePane(conversationId ? "thread" : "list");
@@ -137,10 +144,11 @@ export function ChatShell({
   }
 
   async function handleCreate() {
-    if (creating || sendLockRef.current) return;
+    if (creating || activeSendRef.current) return;
     setCreating(true);
     try {
       const conversation = await createConversation();
+      invalidateActiveSend();
       dispatch({ type: "conversation/created", conversation });
       setMobilePane("thread");
       startTransition(() => {
@@ -166,47 +174,63 @@ export function ChatShell({
 
   async function handleSend(content: string) {
     const conversationId = state.activeConversationId;
-    if (!conversationId || !canSend(state) || sendLockRef.current) return;
+    if (!conversationId || !canSend(state) || activeSendRef.current) return;
 
-    sendLockRef.current = true;
+    streamSeqRef.current += 1;
+    const streamId = `stream-${streamSeqRef.current}`;
     const { tempUserId, tempAssistantId } = makeTempIds(state.localSeq);
     dispatch({
       type: "send/begin",
       conversationId,
+      streamId,
       content,
       tempUserId,
       tempAssistantId,
     });
 
     const controller = new AbortController();
-    abortRef.current = controller;
+    activeSendRef.current = { streamId, conversationId, controller };
 
     const result = await sendMessageStream({
       conversationId,
       content,
       signal: controller.signal,
       onEvent: (event) => {
-        dispatch({ type: "send/stream-event", event });
+        // Drop late chunks from an obsolete/aborted send.
+        if (activeSendRef.current?.streamId !== streamId) return;
+        dispatch({ type: "send/stream-event", streamId, event });
       },
     });
+
+    // Stale completion after navigation or a newer send — do not touch UI/lock.
+    if (activeSendRef.current?.streamId !== streamId) {
+      return;
+    }
 
     if (!result.ok) {
       dispatch({
         type: "send/http-error",
+        streamId,
         status: result.error.status,
         code: result.error.code,
         message: result.error.message,
       });
       // For 409, refresh history in case another run already appended turns.
-      if (result.error.status === 409 || result.error.code === "run_in_progress") {
-        void loadMessages(conversationId);
+      if (
+        result.error.status === 409 ||
+        result.error.code === "run_in_progress"
+      ) {
+        if (activeIdRef.current === conversationId) {
+          void loadMessages(conversationId);
+        }
       }
-      sendLockRef.current = false;
-      abortRef.current = null;
+      if (activeSendRef.current?.streamId === streamId) {
+        activeSendRef.current = null;
+      }
       return;
     }
 
-    dispatch({ type: "send/finished", outcome: result.outcome });
+    dispatch({ type: "send/finished", streamId, outcome: result.outcome });
 
     // Reconcile with persisted history (titles, real ids, terminal statuses).
     try {
@@ -214,23 +238,35 @@ export function ChatShell({
         listMessages(conversationId),
         listConversations(),
       ]);
-      if (activeIdRef.current === conversationId) {
-        dispatch({ type: "history/reconcile", messages });
+      if (
+        activeSendRef.current?.streamId === streamId ||
+        activeIdRef.current === conversationId
+      ) {
+        if (activeIdRef.current === conversationId) {
+          dispatch({
+            type: "history/reconcile",
+            conversationId,
+            messages,
+          });
+        }
       }
       dispatch({ type: "conversations/loaded", conversations });
     } catch {
       // Soft failure — streamed content already visible.
     }
 
-    sendLockRef.current = false;
-    abortRef.current = null;
+    if (activeSendRef.current?.streamId === streamId) {
+      activeSendRef.current = null;
+    }
   }
 
   async function handleStop() {
+    const active = activeSendRef.current;
+    if (!active) return;
     if (state.streamPhase !== "sending" && state.streamPhase !== "streaming") {
       return;
     }
-    dispatch({ type: "send/stop-requested" });
+    dispatch({ type: "send/stop-requested", streamId: active.streamId });
     const runId = state.activeRunId;
     if (runId) {
       try {
@@ -239,7 +275,7 @@ export function ChatShell({
         // Disconnect abort still finalizes partial on the server.
       }
     }
-    abortRef.current?.abort();
+    active.controller.abort();
   }
 
   const activeConversation =
@@ -293,10 +329,7 @@ export function ChatShell({
             <button
               type="button"
               className="chat-back-button"
-              onClick={() => {
-                setMobilePane("list");
-                startTransition(() => router.push("/chat"));
-              }}
+              onClick={() => navigateToConversation(null)}
             >
               Conversations
             </button>
