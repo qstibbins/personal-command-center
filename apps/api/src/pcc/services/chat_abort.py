@@ -2,11 +2,16 @@
 
 Cancel route and streaming generator share a ``threading.Event`` per run id.
 
-**Single-worker assumption:** handles are process-local. Cross-worker cancel
-cannot signal another process's generator. Abandoned DB ``running`` rows
-(no local handle) are recovered by ``chat_recovery`` when
-``pcc_chat_assume_single_worker`` is true. Do not scale ``pcc-api`` above one
-instance until a shared abort/lease mechanism exists.
+**Operational requirement (MVP):** exactly one active ``pcc-api`` process.
+``PCC_CHAT_ASSUME_SINGLE_WORKER`` only gates abandoned-run recovery; it does
+**not** enforce single-process deployment. Handles are process-local:
+
+- Cross-worker cancel cannot signal another process's generator.
+- A second overlapping process (horizontal scale or rolling deploy overlap)
+  will treat peer live ``running`` rows as abandoned and incorrectly finalize
+  them when recovery is enabled.
+- Multi-worker cancellation and recovery are unsupported until a shared
+  abort/lease exists.
 """
 
 from __future__ import annotations

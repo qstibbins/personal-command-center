@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -33,6 +33,10 @@ logger = logging.getLogger(__name__)
 
 TITLE_MAX = 300
 RUNNING_UNIQUE_INDEX = "uq_chat_runs_one_running_per_conversation"
+
+# Test-only synchronization hooks (must stay None in production).
+_claim_after_register_before_commit: Callable[[uuid.UUID], None] | None = None
+_claim_after_commit: Callable[[uuid.UUID], None] | None = None
 
 
 def _session_factory():
@@ -75,9 +79,15 @@ def claim_turn(
     content: str,
     session_factory=None,
 ) -> ClaimResult:
-    """Lock conversation, allocate sequences, insert user + assistant + running run."""
+    """Lock conversation, allocate sequences, insert user + assistant + running run.
+
+    The local abort handle is registered **before** ``commit`` so concurrent
+    recovery cannot observe a committed ``running`` row without a live handle.
+    Failed flush/commit always unregisters and rolls back.
+    """
     session_factory = session_factory or _session_factory()
     owner = normalize_owner_email(owner_email)
+    registered_run_id: uuid.UUID | None = None
     with session_factory() as db:
         try:
             conversation = (
@@ -151,15 +161,33 @@ def claim_turn(
             # Append the just-created user message (already in session).
             context.append(ChatMessageDTO(role="user", content=content))
 
+            # Register before commit: once the running row is visible to other
+            # sessions, recovery must already see a local abort handle.
+            register_run(run.id)
+            registered_run_id = run.id
+            if _claim_after_register_before_commit is not None:
+                _claim_after_register_before_commit(run.id)
+
             db.commit()
         except IntegrityError as exc:
             db.rollback()
+            if registered_run_id is not None:
+                unregister_run(registered_run_id)
+                registered_run_id = None
             if _is_running_unique_violation(exc):
                 raise RunInProgressError("A reply is already in progress") from exc
             logger.exception("Unexpected integrity error during chat claim")
             raise
+        except Exception:
+            db.rollback()
+            if registered_run_id is not None:
+                unregister_run(registered_run_id)
+                registered_run_id = None
+            raise
 
-        register_run(run.id)
+        if _claim_after_commit is not None:
+            _claim_after_commit(run.id)
+
         return ClaimResult(
             conversation_id=conversation_id,
             owner_email=owner,
@@ -374,6 +402,8 @@ def cancel_run(
 
     If the run is ``running`` but has no local abort handle (abandoned after
     crash), finalize it immediately under the single-worker assumption.
+    Abandoned recovery takes the conversation ``FOR UPDATE`` so it cannot race
+    a concurrent claim that still holds the conversation lock.
     """
     session_factory = session_factory or _session_factory()
     owner = normalize_owner_email(owner_email)
@@ -385,6 +415,20 @@ def cancel_run(
         if run.status != "running":
             return run
 
+        if is_locally_active(run_id):
+            request_cancel(run_id, reason="client_stop")
+            db.refresh(run)
+            return run
+
+        # Serialize with claim/delete on the same conversation.
+        db.execute(
+            select(Conversation)
+            .where(Conversation.id == run.conversation_id)
+            .with_for_update()
+        )
+        db.refresh(run)
+        if run.status != "running":
+            return run
         if is_locally_active(run_id):
             request_cancel(run_id, reason="client_stop")
             db.refresh(run)

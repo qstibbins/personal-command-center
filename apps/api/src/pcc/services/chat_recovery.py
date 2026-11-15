@@ -1,15 +1,19 @@
 """Abandoned running-run recovery (Phase 1A.2 PR3 follow-up).
 
-Strategy (single-worker MVP):
-- Live streams always register an in-process abort handle.
+Strategy (single-process MVP):
+- Live claims register an in-process abort handle **before** committing the
+  ``running`` row, so same-process recovery never observes a committed live
+  run without a handle.
 - A DB row with ``status='running'`` and **no** local handle is abandoned
-  (process crash / restart). It is safe to finalize under the single-worker
-  assumption because no other process can own the generator.
+  (process crash / restart). Finalizing it is only safe when exactly one
+  ``pcc-api`` process is active.
 - Legitimately active streams are never recovered: presence of a local handle
   means the stream is alive in this process (no wall-clock timeout).
 
-Multi-worker cancel/recovery remains unsafe — see docs and
-``pcc_chat_assume_single_worker``.
+``pcc_chat_assume_single_worker`` only gates whether this recovery runs; it
+does not enforce topology. Overlapping API processes (scale-out or rolling
+deploy overlap) can incorrectly finalize live peer runs. Multi-worker
+cancel/recovery remains unsupported.
 """
 
 from __future__ import annotations

@@ -31,13 +31,22 @@ Agents must not perform steps that purchase or configure live OAuth secrets unle
 
 ## 3. Chat API worker topology (Phase 1A)
 
-Chat cancel/abort uses an **in-process** registry. Keep **`pcc-api` at a single instance** (`PCC_CHAT_ASSUME_SINGLE_WORKER=true`, default).
+Chat cancel/abort uses an **in-process** registry. MVP requires **exactly one active `pcc-api` process**.
+
+`PCC_CHAT_ASSUME_SINGLE_WORKER=true` (default; set in `render.yaml`) only **gates** abandoned-run recovery. It does **not** enforce single-process deployment or prevent a second worker from starting.
+
+| Constraint | Detail |
+|---|---|
+| Exactly one process | Do not scale `pcc-api` horizontally. |
+| No rolling overlap | Stop the old API process before the new one accepts traffic (or accept brief downtime). Default Render behavior that keeps the previous instance serving while the new deploy becomes healthy creates an **overlap window** where the new process can incorrectly finalize the old process’s live `running` rows. |
+| Multi-worker cancel/recovery | **Unsupported.** Cancel on process B cannot signal process A’s generator; recovery treats peer live runs as abandoned. |
+| Flag alone | Setting `PCC_CHAT_ASSUME_SINGLE_WORKER=false` disables recovery (stuck `running` / 409 risk) without enabling safe multi-worker cancel. |
 
 | Event | Behavior |
 |---|---|
 | Process crash mid-stream | In-flight assistant buffer is lost (by design). On next API start / claim / delete / cancel, abandoned `chat_runs.status='running'` rows with **no** local abort handle are finalized (`cancelled` / `superseded` or `client_stop`) so the one-running unique index is released. |
-| Multi-worker cancel | **Unsupported** — cancel on worker B cannot signal worker A’s generator. Do not scale `pcc-api` horizontally until a shared abort/lease exists. |
 | Soft-delete while streaming | **HTTP 409** `run_in_progress` while a live run is active. |
+| Claim vs recovery | Abort handle is registered **before** the `running` row commits so same-process recovery cannot steal a newly claimed live run. |
 
 Recovery never uses wall-clock timeouts to kill a slow but live stream; liveness is “local abort handle present.”
 

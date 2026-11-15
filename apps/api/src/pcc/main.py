@@ -39,7 +39,7 @@ async def _lifespan(_application: FastAPI):
     else:
         logger.warning(
             "pcc_chat_assume_single_worker=false: abandoned chat-run recovery "
-            "disabled; multi-worker cancel remains unsupported"
+            "disabled; multi-worker cancel/recovery remains unsupported"
         )
     yield
 

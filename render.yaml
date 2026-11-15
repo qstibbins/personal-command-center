@@ -64,7 +64,14 @@ services:
     dockerContext: ./apps/api
     # Single migration owner — do not also migrate from the web service.
     # Failure cancels the new deploy; the previous API instance keeps serving.
-    # Keep a single instance: chat abort/recovery is process-local (Phase 1A).
+    #
+    # Chat MVP hard requirements (abort/recovery are process-local):
+    # - Exactly one active pcc-api process (do not scale horizontally).
+    # - No overlapping API processes during rolling deploys (stop-old-before-
+    #   start-new / accept brief downtime). Default zero-downtime overlap is
+    #   unsafe: the new process can finalize the old process's live runs.
+    # - PCC_CHAT_ASSUME_SINGLE_WORKER only gates recovery; it does not enforce
+    #   single-process topology. Multi-worker cancel/recovery is unsupported.
     preDeployCommand: alembic upgrade head
     envVars:
       - key: PCC_ENV

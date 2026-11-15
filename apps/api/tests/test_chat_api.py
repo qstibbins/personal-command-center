@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import threading
 import uuid
 from unittest import mock
 
 from auth_helpers import TEST_SERVICE_CREDENTIAL
 from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 
 from pcc.auth.token_crypto import hash_api_token
 from pcc.db import session as db_session
@@ -798,3 +800,287 @@ def test_cancel_abandoned_run_finalizes(db_client):
     assert cancelled.status_code == 200
     assert cancelled.json()["status"] == "cancelled"
     assert cancelled.json()["cancel_reason"] == "client_stop"
+
+
+def test_recovery_cannot_steal_newly_claimed_run(db_client):
+    """A. After commit, handle is already registered — recovery cannot steal."""
+    from pcc.services import chat_orchestrator as orch
+    from pcc.services.chat_abort import get_handle, unregister_run
+    from pcc.services.chat_recovery import recover_abandoned_runs_locked
+
+    conv = _create_conversation(db_client)
+    conv_id = uuid.UUID(conv["id"])
+
+    committed = threading.Event()
+    recovery_done = threading.Event()
+    observed: dict = {}
+
+    def after_commit(run_id: uuid.UUID) -> None:
+        # Invariant under register-before-commit: handle exists as soon as
+        # the running row is committed/visible.
+        assert get_handle(run_id) is not None
+        observed["run_id"] = run_id
+        committed.set()
+        assert recovery_done.wait(timeout=5), "recovery thread timed out"
+
+    def recovery_worker() -> None:
+        assert committed.wait(timeout=5), "claim commit timed out"
+        run_id = observed["run_id"]
+        with db_session.SessionLocal() as session:
+            recovered = recover_abandoned_runs_locked(
+                session, conversation_id=conv_id
+            )
+            session.commit()
+            run = session.get(ChatRun, run_id)
+            observed["recovered"] = recovered
+            observed["status"] = run.status if run is not None else None
+        recovery_done.set()
+
+    orch._claim_after_commit = after_commit
+    try:
+        thread = threading.Thread(target=recovery_worker, daemon=True)
+        thread.start()
+        claim = orch.claim_turn(
+            conversation_id=conv_id,
+            owner_email=OWNER,
+            content="live claim",
+        )
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+        assert observed["recovered"] == []
+        assert observed["status"] == "running"
+        assert claim.run_id == observed["run_id"]
+        assert get_handle(claim.run_id) is not None
+    finally:
+        orch._claim_after_commit = None
+        if "run_id" in observed:
+            unregister_run(observed["run_id"])
+
+
+def test_delete_cannot_succeed_while_newly_claimed_run_active(db_client):
+    """B. Delete recovery sees the handle after commit and returns 409."""
+    from pcc.services import chat_orchestrator as orch
+    from pcc.services.chat_abort import get_handle, unregister_run
+    from pcc.services.chat_conversations import soft_delete_conversation
+    from pcc.services.chat_recovery import ActiveRunError
+
+    conv = _create_conversation(db_client)
+    conv_id = uuid.UUID(conv["id"])
+
+    committed = threading.Event()
+    delete_done = threading.Event()
+    observed: dict = {}
+
+    def after_commit(run_id: uuid.UUID) -> None:
+        assert get_handle(run_id) is not None
+        committed.set()
+        assert delete_done.wait(timeout=5), "delete thread timed out"
+
+    def delete_worker() -> None:
+        assert committed.wait(timeout=5), "claim commit timed out"
+        with db_session.SessionLocal() as session:
+            try:
+                soft_delete_conversation(
+                    session, conversation_id=conv_id, owner_email=OWNER
+                )
+                observed["error"] = None
+            except ActiveRunError as exc:
+                observed["error"] = exc
+                session.rollback()
+        delete_done.set()
+
+    orch._claim_after_commit = after_commit
+    try:
+        thread = threading.Thread(target=delete_worker, daemon=True)
+        thread.start()
+        claim = orch.claim_turn(
+            conversation_id=conv_id,
+            owner_email=OWNER,
+            content="delete race",
+        )
+        observed["run_id"] = claim.run_id
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+        assert isinstance(observed.get("error"), ActiveRunError)
+
+        with db_session.SessionLocal() as session:
+            conversation = session.get(Conversation, conv_id)
+            assert conversation is not None
+            assert conversation.status == "active"
+            run = session.get(ChatRun, claim.run_id)
+            assert run is not None
+            assert run.status == "running"
+    finally:
+        orch._claim_after_commit = None
+        if "run_id" in observed:
+            unregister_run(observed["run_id"])
+
+
+def test_failed_claim_does_not_leave_orphaned_abort_handle(db_client):
+    """C. Commit failure after register unregisters the handle."""
+    from pcc.services import chat_orchestrator as orch
+    from pcc.services.chat_abort import get_handle
+
+    conv = _create_conversation(db_client)
+    conv_id = uuid.UUID(conv["id"])
+    seen_run_id: dict = {}
+
+    def after_register(run_id: uuid.UUID) -> None:
+        seen_run_id["id"] = run_id
+        assert get_handle(run_id) is not None
+        raise OperationalError("SELECT 1", {}, Exception("forced commit failure"))
+
+    orch._claim_after_register_before_commit = after_register
+    try:
+        try:
+            orch.claim_turn(
+                conversation_id=conv_id,
+                owner_email=OWNER,
+                content="will fail",
+            )
+            raise AssertionError("claim_turn should have raised")
+        except OperationalError:
+            pass
+
+        assert "id" in seen_run_id
+        assert get_handle(seen_run_id["id"]) is None
+
+        with db_session.SessionLocal() as session:
+            assert (
+                session.scalar(select(ChatRun).where(ChatRun.status == "running"))
+                is None
+            )
+    finally:
+        orch._claim_after_register_before_commit = None
+
+
+def test_concurrent_claims_preserve_one_running_and_409(db_client):
+    """D. Concurrent claims → exactly one winner; loser is RunInProgressError."""
+    from pcc.services import chat_orchestrator as orch
+    from pcc.services.chat_abort import get_handle, unregister_run
+
+    conv = _create_conversation(db_client)
+    conv_id = uuid.UUID(conv["id"])
+    barrier = threading.Barrier(2, timeout=5)
+    winners: list = []
+    losers: list = []
+    lock = threading.Lock()
+
+    def worker(label: str) -> None:
+        barrier.wait()
+        try:
+            claim = orch.claim_turn(
+                conversation_id=conv_id,
+                owner_email=OWNER,
+                content=f"claim-{label}",
+            )
+            with lock:
+                winners.append(claim)
+        except orch.RunInProgressError as exc:
+            with lock:
+                losers.append(exc)
+
+    threads = [
+        threading.Thread(target=worker, args=("a",), daemon=True),
+        threading.Thread(target=worker, args=("b",), daemon=True),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=10)
+        assert not thread.is_alive()
+
+    assert len(winners) == 1
+    assert len(losers) == 1
+    claim = winners[0]
+    assert get_handle(claim.run_id) is not None
+
+    with db_session.SessionLocal() as session:
+        running = session.scalars(
+            select(ChatRun).where(ChatRun.status == "running")
+        ).all()
+        assert len(running) == 1
+        assert running[0].id == claim.run_id
+
+    unregister_run(claim.run_id)
+
+
+def test_normal_completion_removes_handle_and_leaves_terminal(db_client):
+    """E. Successful stream unregisters the handle and leaves a terminal run."""
+    from pcc.services.chat_abort import get_handle
+    from pcc.services.chat_orchestrator import claim_turn, iter_sse_for_claim
+
+    conv = _create_conversation(db_client)
+    claim = claim_turn(
+        conversation_id=uuid.UUID(conv["id"]),
+        owner_email=OWNER,
+        content="hello complete",
+    )
+    assert get_handle(claim.run_id) is not None
+    body = "".join(iter_sse_for_claim(claim))
+    assert "message_end" in body or "content_delta" in body
+    assert get_handle(claim.run_id) is None
+
+    with db_session.SessionLocal() as session:
+        run = session.get(ChatRun, claim.run_id)
+        assert run is not None
+        assert run.status == "completed"
+        assert session.scalar(select(ChatRun).where(ChatRun.status == "running")) is None
+
+
+def test_recovery_skips_terminal_run_during_finalize_cleanup(db_client):
+    """Recovery must not disturb a run already finalized (vs handle cleanup)."""
+    from pcc.services.chat_abort import get_handle, register_run, unregister_run
+    from pcc.services.chat_orchestrator import StreamOutcome, claim_turn, finalize_turn
+    from pcc.services.chat_recovery import recover_abandoned_runs_locked
+
+    conv = _create_conversation(db_client)
+    claim = claim_turn(
+        conversation_id=uuid.UUID(conv["id"]),
+        owner_email=OWNER,
+        content="finalize race",
+    )
+    assert get_handle(claim.run_id) is not None
+
+    # Simulate stream completion: terminal DB state while handle still present,
+    # then recovery, then unregister (mirrors finalize_turn → unregister order).
+    finalize_turn(
+        claim=claim,
+        outcome=StreamOutcome(
+            content="done",
+            usage=None,
+            message_status="complete",
+            run_status="completed",
+            cancel_reason=None,
+            error_code=None,
+            error_message=None,
+            finish_reason="stop",
+        ),
+    )
+    assert get_handle(claim.run_id) is not None  # not unregistered yet
+
+    with db_session.SessionLocal() as session:
+        recovered = recover_abandoned_runs_locked(
+            session, conversation_id=uuid.UUID(conv["id"])
+        )
+        session.commit()
+        assert recovered == []
+        run = session.get(ChatRun, claim.run_id)
+        assert run is not None
+        assert run.status == "completed"
+
+    unregister_run(claim.run_id)
+    assert get_handle(claim.run_id) is None
+
+    # After handle cleanup, still not "abandoned" because status is terminal.
+    with db_session.SessionLocal() as session:
+        recovered = recover_abandoned_runs_locked(
+            session, conversation_id=uuid.UUID(conv["id"])
+        )
+        session.commit()
+        assert recovered == []
+        assert session.get(ChatRun, claim.run_id).status == "completed"
+
+    # Sanity: register without running row must not invent recoveries.
+    register_run(claim.run_id)
+    unregister_run(claim.run_id)
