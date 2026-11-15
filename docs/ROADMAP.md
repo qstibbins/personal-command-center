@@ -1,6 +1,6 @@
 # Personal Command Center (PCC) — Development Roadmap
 
-**Last updated:** 2026-11-13 (Milestone 3.5b.2 application-path verification added; priorities unchanged)  
+**Last updated:** 2026-11-15 (Phase 1A.2 chat + ADR 0005 noted; Milestone 3 priorities unchanged)  
 **Status convention:** `Verified` = supported by reported tests/observed behavior; `Implemented, awaiting acceptance` = code reportedly changed but not browser-verified; `Planned` = not yet delivered. Confirm against Git and the running app before closing a milestone.
 
 ## Delivery strategy
@@ -117,6 +117,25 @@ Delivered:
 **Exit criterion:** PCC is deployed at a secure private URL without exposing personal captures or unauthenticated write endpoints, the capture workflow survives a restart, and nothing in the design blocks later remote access.
 
 **Open Milestone 3 implementation dependencies (not ChatGPT iPhone feasibility):** owner Render provisioning (3.5c) and secret/OAuth cutover; operational secret-rotation cadence; optional rate limits. Hosting/ingress model resolved in ADR 0004; M3.5b repo artifacts and M3.5b.1–3.5b.2 CI verification are on `main`. Auth.js tables are owned by Alembic revision `0003_authjs_tables` (resolved in Milestone 3.3). ChatGPT iPhone support, auth method, and reachability remain **Milestone 4 feasibility-gate** items and are not required to close Milestone 3. Private FastAPI in v0.1 may require a later controlled public authenticated surface if Milestone 4 needs internet-reachable tool calls — do not expose FastAPI publicly preemptively.
+
+## Phase 1A — Provider-neutral PCC chat (parallel to Milestone 3 cutover)
+
+**Status: Implementation complete on `main` (PR1–PR5); ADR 0005 Accepted; does not complete Milestone 3.5c.**
+
+PCC-owned conversational UI with a mock AI provider, reusing ADR 0003/0004 auth and private FastAPI. Distinct from Milestone 4 (ChatGPT → PCC tools).
+
+| PR | Deliverable | Status |
+|---|---|---|
+| PR1 (#13) | Chat schema + scopes + Alembic | Merged |
+| PR2 (#14) | `ProviderAdapter` + MockProvider | Merged |
+| PR3 (#15) | Orchestrator + `/api/v1/chat/*` SSE | Merged |
+| PR4 (#16) | Next.js `/api/chat/*` BFF proxy | Merged |
+| PR5 (#17) | Responsive `/chat` UI + streamId isolation | Merged |
+| PR6 | ADR 0005 + docs index / ARCHITECTURE / HANDOFF / ROADMAP | This documentation track |
+
+**Binding ops:** exactly one non-overlapping `pcc-api` process; `PCC_CHAT_ASSUME_SINGLE_WORKER` is a recovery gate only. See `docs/decisions/0005-provider-neutral-chat.md`, `docs/chat-architecture.md`, `docs/deploy/render-runbook.md` §3.
+
+**Still open for Phase 1A acceptance:** real iPhone Safari or Simulator pass of `docs/chat-mobile-verification.md`. Real providers, import, MCP, and multi-worker cancel remain **planned / unsupported**.
 
 ## Milestone 4 — ChatGPT ↔ PCC integration
 

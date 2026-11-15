@@ -1,7 +1,8 @@
 # Personal Command Center (PCC) — Architecture
 
-**Last updated:** 2026-11-14 (Phase 1A.2 PR3 chat orchestration API)
-**Branch inspected:** `main` through Phase 1A.2 PR2; orchestration on `feat/chat-orchestration-api`
+**Last updated:** 2026-11-15 (Phase 1A.2 PR1–PR5 on `main`; ADR 0005 Accepted)  
+**Branch inspected:** `main` through Phase 1A.2 PR5 (`25ef229`)  
+**Chat decision / ops index:** [`docs/decisions/0005-provider-neutral-chat.md`](decisions/0005-provider-neutral-chat.md), [`docs/chat-architecture.md`](chat-architecture.md)
 
 ## How to read this document
 
@@ -19,12 +20,12 @@ Product intent lives in `PROJECT.md`, sequencing in `ROADMAP.md`, and the next a
 
 ## A1. System summary
 
-PCC is currently a **single-user capture-and-Inbox application**. A user signs in with an allowlisted Google account, then submits text or a URL string through a web form. It is stored in PostgreSQL and listed in an Inbox. That is the only implemented product capability.
+PCC is currently a **single-user** application with two product surfaces: **Universal Capture / Inbox** and **provider-neutral chat** (mock provider only).
 
-- Website auth: Auth.js v5 Google sign-in with a verified-email allowlist and PostgreSQL database sessions. Pages and Server Actions check the session server-side; sign-out deletes the session row.
-- FastAPI capture endpoints accept either the Next.js service credential (`PCC_SERVICE_CREDENTIAL`) or a hashed, scoped, revocable personal API token with scopes `captures:read` / `captures:write`. The service principal also carries `chat:read` / `chat:write` for upcoming chat BFF calls; personal token issuance remains capture-only.
+- Website auth: Auth.js v5 Google sign-in with a verified-email allowlist and PostgreSQL database sessions. Pages, Server Actions, and chat BFF routes check the session server-side; sign-out deletes the session row.
+- FastAPI capture endpoints accept either the Next.js service credential (`PCC_SERVICE_CREDENTIAL`) or a hashed, scoped, revocable personal API token with scopes `captures:read` / `captures:write`. The service principal also carries `chat:read` / `chat:write` for chat BFF calls; personal token issuance remains capture-only.
 - Owner-only API token management: allowlisted Auth.js session on `/settings/api-tokens`, which calls FastAPI management routes using the service credential only (API tokens cannot manage tokens).
-- No AI/LLM integration exists.
+- Chat: authenticated `/chat` UI → `/api/chat/*` BFF → private `/api/v1/chat/*` → orchestrator → **MockProvider** → PostgreSQL. No paid AI provider SDKs. See ADR 0005.
 - No code processes captures: they are stored as `pending` and never change status.
 - A Redis/RQ worker exists as infrastructure with a demo job only.
 
@@ -33,31 +34,35 @@ The README states this is "a development foundation, not a production-ready app"
 ## A2. Components and responsibilities
 
 ```
-Browser ──HTML/RSC/Server Action──▶ Next.js (apps/web, :3000)
-   │ Auth.js session cookie (opaque)         │  auth() + allowlist check
-   │                                         │  server-side fetch + Bearer service credential
-   └──── /api/auth/* (Auth.js) ──────────────┤
-                                             ▼
-                                       FastAPI (apps/api, :8000) ──SQLAlchemy/psycopg──▶ PostgreSQL
- RQ worker (apps/api) ──redis-py──▶ Redis 7                                              │
- (not connected to capture)              Auth.js tables (users/accounts/sessions/…) ─────┘
+Browser ──HTML/RSC/Server Action + /chat client──▶ Next.js (apps/web, :3000)
+   │ Auth.js session cookie (opaque)              │  auth() + allowlist check
+   │                                              │  server-side fetch + Bearer service credential
+   │                                              │  /api/chat/* BFF (JSON + SSE proxy)
+   └──── /api/auth/* (Auth.js) ───────────────────┤
+                                                  ▼
+                                            FastAPI (apps/api, :8000) ──SQLAlchemy/psycopg──▶ PostgreSQL
+  RQ worker (apps/api) ──redis-py──▶ Redis 7       │ chat orchestrator → MockProvider         │
+  (not connected to capture/chat)                 Auth.js + captures + api_tokens + chat ────┘
 ```
 
 | Component | Location | Responsibility (as implemented) |
 |---|---|---|
-| Web UI | `apps/web` | Next.js 15 / React 19 App Router. `/` (protected): capture form, Inbox, health, sign-out. `/signin`: Google sign-in. `/settings/api-tokens` (protected): create/list/revoke API tokens. |
+| Web UI | `apps/web` | Next.js 15 / React 19 App Router. `/` (protected): capture form, Inbox, health, sign-out. `/chat` (protected): conversation list + streaming transcript. `/signin`: Google sign-in. `/settings/api-tokens` (protected): create/list/revoke API tokens. |
+| Chat UI | `apps/web/app/chat/*` | Client shell: list/create/select, history, composer Send/Stop, SSE parse, `streamId` stale-event isolation, mobile dvh/safe-area. |
+| Chat BFF | `apps/web/app/api/chat/*` | Session gate; proxy CRUD + SSE to FastAPI; session-derived `owner_email`; abort forwarding. |
 | Auth.js | `apps/web/auth.ts`, `auth-allowlist.ts`, `auth-session.ts`, `app/api/auth/[...nextauth]` | Google provider, `@auth/pg-adapter` database sessions, allowlist, handlers. |
 | Server Action | `apps/web/app/actions.ts`, `api-tokens-actions.ts` | `createCapture` and token create/list/revoke require allowlisted session, then call FastAPI with the service credential. |
 | Client form | `apps/web/app/capture-form.tsx` | `useActionState` form: pending ("Saving…"), success message with reset, error message with input preserved. |
 | API | `apps/api/src/pcc/main.py`, `api/captures.py`, `api/api_tokens.py`, `api/chat.py` | FastAPI app exposing health, capture, API-token, and chat (CRUD + SSE) endpoints. |
-| API auth | `apps/api/src/pcc/auth/` | Bearer service-credential and hashed API-token verification; `require_scopes`; `require_service_principal` for token management. |
-| Services | `apps/api/src/pcc/services/captures.py`, `services/api_tokens.py` | Capture CRUD helpers and API token lifecycle (hash-only storage). |
-| Schemas | `apps/api/src/pcc/schemas/capture.py`, `schemas/api_token.py` | Pydantic request/response models and validation. |
+| API auth | `apps/api/src/pcc/auth/` | Bearer service-credential and hashed API-token verification; `require_scopes`; chat routes require service principal + `chat:*`. |
+| Services | `apps/api/src/pcc/services/captures.py`, `api_tokens.py`, `chat_*` | Capture/token helpers; chat ownership, conversations, orchestrator, abort registry, recovery. |
+| Providers | `apps/api/src/pcc/providers/` | `ProviderAdapter` Protocol + sync `MockProvider` (only registered provider). |
+| Schemas | `apps/api/src/pcc/schemas/capture.py`, `api_token.py`, `chat.py` | Pydantic request/response models and validation. |
 | Persistence | `apps/api/src/pcc/db/` | SQLAlchemy 2.0 declarative models, engine, `SessionLocal`. |
-| Migrations | `apps/api/migrations/` | Alembic revisions (Auth.js tables + `api_tokens`). |
+| Migrations | `apps/api/migrations/` | Alembic revisions through `0005_chat_schema`. |
 | Worker | `apps/api/src/pcc/worker/` | RQ `Worker` on queue `default`; one `sample_job`; `submit_demo` enqueues it. **Not deployed on Render v0.1.** |
 | Infrastructure (local) | `compose.yaml` | PostgreSQL and Redis only, loopback-bound. |
-| Infrastructure (prod prep) | `apps/*/Dockerfile`, `render.yaml` | Render Blueprint: public web + private API + managed Postgres; no Redis/worker. |
+| Infrastructure (prod prep) | `apps/*/Dockerfile`, `render.yaml` | Render Blueprint: public web + private API + managed Postgres; no Redis/worker; `PCC_CHAT_ASSUME_SINGLE_WORKER`. |
 
 ### Request flows (verified from code)
 
@@ -97,11 +102,20 @@ The browser never talks to FastAPI directly. All API calls originate from the Ne
 | `GET/POST …/messages` | History (JSON) or send + SSE mock stream; **409** `run_in_progress` if a run is active. Soft-delete also **409** while live. |
 | `POST /api/v1/chat/runs/{run_id}/cancel` | Idempotent abort; finalize to `partial` + `cancelled`. Abandoned runs (no local handle) finalize under single-worker recovery. |
 
+**Next.js chat BFF** (browser → same-origin; session cookie; never exposes service credential):
+
+| Method & path | Upstream |
+|---|---|
+| `GET/POST /api/chat/conversations` | `/api/v1/chat/conversations` |
+| `GET/PATCH/DELETE /api/chat/conversations/[id]` | same under `/api/v1/chat/...` |
+| `GET/POST /api/chat/conversations/[id]/messages` | history JSON / SSE stream |
+| `POST /api/chat/runs/[runId]/cancel` | cancel |
+
 OpenAPI docs (`/docs`, `/redoc`, `/openapi.json`) are served only when `PCC_ENV` is not `production`. In production they return 404. Calling protected endpoints from `/docs` in non-production still requires a Bearer token.
 
-**Auth (Milestones 3.2–3.4 + Phase 1A PR1 scopes):** FastAPI `pcc.auth` verifies `Authorization: Bearer` against `PCC_SERVICE_CREDENTIAL` (and optional previous) **or** a row in `api_tokens` matched by SHA-256 hash. Revoked and expired API tokens yield 401. Scopes are enforced independently via `require_scopes(...)`. Service credential scopes include capture + chat; `AllowedScope` for personal tokens stays capture-only. Chat routes use service-principal-only auth (no DB session held for streaming) and require BFF-asserted `owner_email`. Token management routes reject API-token principals (403) and must be reached through the allowlisted Next.js session control path. Website Auth.js v5 Google sign-in with PostgreSQL database sessions protects pages and Server Actions.
+**Auth (Milestones 3.2–3.4 + Phase 1A chat scopes):** FastAPI `pcc.auth` verifies `Authorization: Bearer` against `PCC_SERVICE_CREDENTIAL` (and optional previous) **or** a row in `api_tokens` matched by SHA-256 hash. Revoked and expired API tokens yield 401. Scopes are enforced independently via `require_scopes(...)`. Service credential scopes include capture + chat; `AllowedScope` for personal tokens stays capture-only. Chat routes use service-principal-only auth and require BFF-asserted `owner_email`. Streaming does not hold a request-scoped DB session across yields. Token management routes reject API-token principals (403) and must be reached through the allowlisted Next.js session control path. Website Auth.js v5 Google sign-in with PostgreSQL database sessions protects pages, Server Actions, and chat BFF/UI.
 
-**Not implemented:** capture get-by-id/update/delete, task/project endpoints, Next.js chat BFF/UI, real AI providers, ChatGPT import.
+**Not implemented:** capture get-by-id/update/delete, task/project endpoints, real AI providers, ChatGPT import, MCP tools, multi-worker chat cancel.
 
 **Validation rules (`schemas/capture.py`, enforced by FastAPI):**
 - `title` and `content` have leading/trailing whitespace trimmed; internal whitespace and line breaks are preserved. A blank title becomes `null`; blank content is rejected. Title max is 300 characters.
@@ -146,14 +160,16 @@ Only `pending` is ever written. `processing`, `processed` and `failed` are permi
 | `revoked_at` | timestamptz, nullable | Set on revoke; revoked tokens authenticate as 401 |
 | `created_by_email` | varchar(320) | Allowlisted operator email at issuance |
 
-**Chat tables** (Alembic `0005_chat_schema`; SQLAlchemy `Conversation`, `Message`, `MessageUsage`, `ChatRun`) — used by Phase 1A.2 PR3 orchestrator + `/api/v1/chat/*`:
+**Chat tables** (Alembic `0005_chat_schema`; SQLAlchemy `Conversation`, `Message`, `MessageUsage`, `ChatRun`) — used by orchestrator + FastAPI `/api/v1/chat/*` + Next.js BFF/UI:
 
 | Table | Role |
 |---|---|
 | `conversations` | Owner-scoped threads; `next_sequence` allocator; soft delete via `status=deleted`; import hooks `source` / `source_external_id` |
 | `messages` | Ordered by unique `(conversation_id, sequence)`; roles `system\|user\|assistant\|tool`; statuses `complete\|streaming\|partial\|failed` (no `cancelled`) |
 | `message_usage` | Optional 1:1 usage row keyed by `message_id` |
-| `chat_runs` | Generation attempts; partial unique one `running` run per conversation |
+| `chat_runs` | Generation attempts; partial unique one `running` run per conversation; cancel reasons `client_stop` / `disconnect` / `superseded` |
+
+Invariants: transactional sequence allocation; at most one `running` run per conversation; BFF-derived `owner_email` ownership. Details: ADR 0005.
 
 **Not present:** knowledge, threads/workstreams, agents beyond `chat_runs`, or tool-invocation tables.
 
@@ -169,12 +185,12 @@ apps/api/
     api/{deps,captures,api_tokens,chat}.py
     auth/                 # principals, credentials, token_crypto, require_scopes / chat service principal
     schemas/{capture,api_token,chat}.py
-    services/{captures,api_tokens,chat_ownership,chat_conversations,chat_orchestrator,chat_abort}.py
+    services/{captures,api_tokens,chat_ownership,chat_conversations,chat_orchestrator,chat_abort,chat_recovery}.py
     providers/            # ProviderAdapter Protocol + MockProvider (Phase 1A.2 PR2)
     db/{base,models,session}.py
-    core/config.py        # pydantic-settings: database_url, redis_url, service credential, default chat provider
+    core/config.py        # pydantic-settings: database_url, redis_url, service credential, default chat provider, single-worker gate
     worker/{main,jobs,submit_demo}.py
-  tests/                  # conftest, captures, validation, auth, api_tokens, health, chat schema, providers
+  tests/                  # conftest, captures, validation, auth, api_tokens, health, chat schema/API, providers, alembic
 ```
 
 The layering is route → service → SQLAlchemy model, with Pydantic schemas at the boundary. Sessions are created per request by `get_db`. Services call `commit()` themselves.
@@ -189,11 +205,13 @@ apps/web/
   auth-session.ts         # getAllowlistedSession for pages and Server Actions
   auth-db.ts              # pg Pool + DATABASE_URL rewriting
   app/
-    layout.tsx            # root layout, metadata, imports styles.css
-    page.tsx              # protected: health + Inbox + <CaptureForm/> + sign-out
+    layout.tsx            # root layout, viewport-fit=cover, styles.css
+    page.tsx              # protected: health + Inbox + <CaptureForm/> + Chat nav + sign-out
+    chat/                 # protected /chat UI (shell, list, transcript, composer, SSE/state)
     settings/api-tokens/page.tsx  # protected: create/list/revoke API tokens
     signin/page.tsx       # Google sign-in
     api/auth/[...nextauth]/route.ts
+    api/chat/             # authenticated BFF: conversations, messages (SSE), cancel
     api.ts                # server-only API base URL + Bearer credential headers
     capture-form.tsx      # "use client" form (useActionState)
     capture-state.ts      # CaptureFormState type + initialCaptureState
@@ -201,10 +219,10 @@ apps/web/
     api-tokens-actions.ts # "use server" token create/list/revoke (session-gated)
     api-token-create-form.tsx / api-token-list.tsx
     auth-actions.ts       # signOutAction
-    styles.css            # global CSS (no CSS framework)
+    styles.css            # global CSS + chat shell (vh→dvh, safe-area); no CSS framework
 ```
 
-State types live in `capture-state.ts` / `api-tokens-state.ts` because a `"use server"` module may only export async functions. `Capture` and `Health` types in `page.tsx` are hand-written, not generated. Authorization is enforced in page/Server Action code on the Node runtime; Edge middleware is not used for session checks.
+State types live in `capture-state.ts` / `api-tokens-state.ts` because a `"use server"` module may only export async functions. Chat client state is a pure reducer in `app/chat/chat-state.ts` (Vitest-covered). `Capture` and `Health` types in `page.tsx` are hand-written, not generated. Authorization is enforced in page/Server Action/BFF code on the Node runtime; Edge middleware is not used for session checks.
 
 ## A7. Infrastructure and configuration
 
@@ -218,8 +236,10 @@ State types live in `capture-state.ts` / `api-tokens-state.ts` because a `"use s
 | `AUTH_DATABASE_URL` | Yes (optional; Next.js `auth-db.ts`) | Preferred pg URL for Auth.js when set. |
 | `REDIS_URL` | Yes (worker) | |
 | `POSTGRES_USER/PASSWORD/DB` | Yes (Compose) | Defaults in `compose.yaml` |
-| `PCC_SERVICE_CREDENTIAL` | Yes (FastAPI `core/config.py`; Next.js `app/api.ts`) | Server-only shared secret for capture and token-management endpoints. |
+| `PCC_SERVICE_CREDENTIAL` | Yes (FastAPI `core/config.py`; Next.js `app/api.ts`, chat BFF) | Server-only shared secret for capture, token-management, and chat BFF→API. |
 | `PCC_SERVICE_CREDENTIAL_PREVIOUS` | Yes (FastAPI) | Optional dual-read during rotation. |
+| `PCC_DEFAULT_CHAT_PROVIDER` | Yes (`core/config.py`) | Default `mock`. |
+| `PCC_CHAT_ASSUME_SINGLE_WORKER` | Yes (`core/config.py`, recovery) | Gates abandoned-run recovery; does **not** enforce single process. |
 | `API_INTERNAL_URL` | Yes (`app/api.ts`) | Defaults to `http://localhost:8000`. |
 | `API_INTERNAL_HOSTPORT` | Yes (`app/api.ts`) | Render private-service `host:port`; used when `API_INTERNAL_URL` unset. |
 | `AUTH_SECRET` | Yes (Auth.js) | Session signing/encryption secret. |
@@ -255,7 +275,7 @@ Prerequisites per README: Docker, Node 22, pnpm 10.11.0, Python 3.12+, `uv`.
 
 **Backend test design:** all API endpoint tests in `test_captures.py` and `test_capture_validation.py` run through the `db_client` fixture. It refuses to run unless `TEST_DATABASE_URL` is set and the database name is exactly `pcc_test`. An autouse override blocks unisolated `get_db` usage so tests cannot accidentally hit development/production databases. The fixture runs `Base.metadata.create_all` and `drop_all` around each test and overrides `get_db`. The tests therefore build schema from the models and **do not exercise the Alembic migrations**. CI provisions `pcc_test` through a Postgres service container; locally it must be created manually.
 
-**Frontend test design:** Server Action tests (capture + API token actions, including session-gate denial and service-credential headers), plus unit tests for allowlist parsing, Auth.js session gating, sign-out action, and database URL rewriting. `fetch`, `next/cache`, and Auth.js session helpers are mocked in Vitest's Node environment. There are no component tests, browser tests, or Vitest config file. Live Google OAuth is not automated.
+**Frontend test design:** Server Action tests (capture + API token actions, including session-gate denial and service-credential headers); chat BFF/proxy tests; chat SSE parser + state-reducer tests (including streamId stale-event isolation); plus unit tests for allowlist parsing, Auth.js session gating, sign-out action, and database URL rewriting. `fetch`, `next/cache`, and Auth.js session helpers are mocked in Vitest's Node environment. There are no React component/browser tests or Vitest config file. Live Google OAuth and real Safari keyboard checks are not automated (`docs/chat-mobile-verification.md`).
 
 **CI (`.github/workflows/ci.yml`)** runs on every push and PR:
 - Backend job: `uv sync`, `uv run pytest`, `uv run ruff check`.
@@ -274,12 +294,13 @@ Prerequisites per README: Docker, Node 22, pnpm 10.11.0, Python 3.12+, `uv`.
 | Tests protect real data via `pcc_test` guard | Implemented in `conftest.py`. |
 | **ADR 0003** Google/Auth.js database sessions + FastAPI service credential + scoped API tokens | Milestones 3.2–3.4 implemented in code; private deploy remains. |
 | **ADR 0004** Render hosting: public Next.js, private FastAPI, managed Postgres | Design accepted. M3.5b adds Dockerfiles + `render.yaml` + hardening. M3.5b.1 verifies images/migrate/smoke in CI. Live Render resources: owner only (M3.5c). Redis/worker deferred. |
+| **ADR 0005** Provider-neutral chat (BFF + orchestrator + MockProvider + `/chat` UI) | Accepted. Phase 1A.2 PR1–PR5 on `main`. Mock-only; single non-overlapping `pcc-api`; Safari checklist still manual. |
 
 ## A10. Verification status
 
 | Item | Status |
 |---|---|
-| Source, config, migrations, tests, CI and Compose were read for this document | Done (updated for M3.5b.1 on 2026-11-13) |
+| Source, config, migrations, tests, CI and Compose were read for this document | Done (updated for Phase 1A.2 PR5 + ADR 0005 on 2026-11-15) |
 | Frontend `pnpm lint:web`, `pnpm test:web`, `pnpm build:web` | Covered by `.github/workflows/ci.yml` |
 | Backend `uv run pytest` (`pcc_test`) and `ruff check src tests` | Covered by `.github/workflows/ci.yml` |
 | Alembic through `0005_chat_schema` (Auth.js + `api_tokens` + chat) | Exercised in production-verification workflow + pytest `test_chat_alembic.py` against PostgreSQL |

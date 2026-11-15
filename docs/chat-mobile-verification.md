@@ -1,5 +1,7 @@
 # Chat mobile verification checklist (Phase 1A.2 PR5)
 
+Architecture / ops: [`chat-architecture.md`](chat-architecture.md), ADR [`decisions/0005-provider-neutral-chat.md`](decisions/0005-provider-neutral-chat.md).
+
 Automated Vitest coverage exercises conversation selection, history ordering,
 streaming updates, stop/cancel, duplicate-send prevention, partial/failed
 messages, HTTP 409 `run_in_progress`, and empty/loading/error states.

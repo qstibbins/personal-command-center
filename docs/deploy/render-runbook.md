@@ -31,6 +31,8 @@ Agents must not perform steps that purchase or configure live OAuth secrets unle
 
 ## 3. Chat API worker topology (Phase 1A)
 
+See also ADR 0005 (`docs/decisions/0005-provider-neutral-chat.md`) and `docs/chat-architecture.md`.
+
 Chat cancel/abort uses an **in-process** registry. MVP requires **exactly one active `pcc-api` process**.
 
 `PCC_CHAT_ASSUME_SINGLE_WORKER=true` (default; set in `render.yaml`) only **gates** abandoned-run recovery. It does **not** enforce single-process deployment or prevent a second worker from starting.

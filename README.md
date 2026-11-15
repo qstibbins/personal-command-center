@@ -76,19 +76,21 @@ At the root: `pnpm lint:web && pnpm test:web && pnpm build:web`.
 
 ## What is and isn't included
 
-Included: a Universal Capture web form (text or URL, with pending, success, and error feedback) and an Inbox listing saved captures; FastAPI endpoints `GET /api/v1/health`, `POST|GET /api/v1/captures`, and API-token create/list/revoke; FastAPI service-credential and hashed scoped API-token authentication (`captures:read` / `captures:write`); Auth.js v5 Google sign-in with a verified-email allowlist and PostgreSQL database sessions protecting pages and Server Actions; owner-only `/settings/api-tokens` UI; SQLAlchemy models and Alembic migrations (`captures`, Auth.js session tables, `api_tokens`, plus unused `projects` and `tasks` tables); PostgreSQL; Redis and an RQ worker with a demo job only; backend and frontend tests; CI; and ADRs. See `docs/ARCHITECTURE.md` for details.
+Included: a Universal Capture web form (text or URL, with pending, success, and error feedback) and an Inbox listing saved captures; authenticated provider-neutral **chat** (`/chat` UI + `/api/chat/*` BFF + `/api/v1/chat/*`) with a **mock** streaming provider only; FastAPI endpoints `GET /api/v1/health`, `POST|GET /api/v1/captures`, API-token create/list/revoke, and chat CRUD/SSE; FastAPI service-credential and hashed scoped API-token authentication (`captures:read` / `captures:write`; service principal also has `chat:read` / `chat:write`); Auth.js v5 Google sign-in with a verified-email allowlist and PostgreSQL database sessions protecting pages, Server Actions, and chat BFF; owner-only `/settings/api-tokens` UI; SQLAlchemy models and Alembic migrations (`captures`, Auth.js session tables, `api_tokens`, chat tables, plus unused `projects` and `tasks`); PostgreSQL; Redis and an RQ worker with a demo job only; backend and frontend tests; CI; Dockerfiles/`render.yaml` prep; and ADRs. See `docs/ARCHITECTURE.md` and `docs/chat-architecture.md` for details.
 
-Not yet included: file uploads, object storage, task and project APIs, URL remote fetching, capture processing, AI integrations, ChatGPT integration, ChatGPT history import, agents, PWA offline support, production Dockerfiles, TLS, backups, and full production hardening. **Do not expose this scaffold to the internet or upload private journal entries yet.**
+Not yet included: file uploads, object storage, task and project APIs, URL remote fetching, capture processing, **real** AI provider SDKs, ChatGPT integration, ChatGPT history import, MCP tools, agents, PWA offline support, live Render provisioning, and full production hardening. Chat requires **exactly one non-overlapping `pcc-api` process**. **Do not expose this scaffold to the internet or upload private journal entries yet.**
 
 ## Architecture
 
-- `apps/web`: Next.js UI
-- `apps/api`: FastAPI HTTP server + separate worker process
+- `apps/web`: Next.js UI (Inbox + `/chat`) and authenticated chat BFF
+- `apps/api`: FastAPI HTTP server + separate worker process (worker unused by chat)
 - `packages/api-client`: reserved for OpenAPI-generated client
-- `docs/decisions`: architectural decisions
+- `docs/decisions`: architectural decisions (see **ADR 0005** for chat)
+- `docs/chat-architecture.md`: chat docs index / feature matrix
+- `docs/chat-mobile-verification.md`: manual Safari/Simulator checklist
 - `compose.yaml`: local PostgreSQL and Redis only, loopback-bound ports
 
-The database is the system of record; the worker is for slow tasks; the AI provider will be an adapter, not the owner of business state.
+The database is the system of record; the worker is for slow tasks; the AI provider is an adapter (`MockProvider` today), not the owner of business state.
 
 ## Troubleshooting
 
@@ -100,4 +102,4 @@ The database is the system of record; the worker is for slow tasks; the AI provi
 
 ## Next milestone
 
-Continue Milestone 3 per ADR 0003: private HTTPS deployment (API tokens are implemented). See `docs/ROADMAP.md`.
+Continue Milestone 3 per ADR 0003 / ADR 0004: owner Render provisioning (M3.5c). Phase 1A chat is documented in ADR 0005 — keep single-process `pcc-api` and complete Safari verification before treating mobile chat as accepted. See `docs/ROADMAP.md` and `docs/HANDOFF.md`.
