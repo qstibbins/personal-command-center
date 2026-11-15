@@ -20,13 +20,22 @@ async def _lifespan(_application: FastAPI):
     if settings.pcc_chat_assume_single_worker:
         from pcc.services.chat_recovery import recover_all_abandoned_running_runs
 
-        recovered = recover_all_abandoned_running_runs()
-        if recovered:
+        # Must not block process bind / liveness when Postgres is unreachable
+        # (smoke negatives and Render restarts). Readiness stays on /api/v1/ready.
+        try:
+            recovered = recover_all_abandoned_running_runs()
+        except (SQLAlchemyError, OSError, TimeoutError) as exc:
             logger.warning(
-                "Startup recovered %s abandoned chat run(s): %s",
-                len(recovered),
-                recovered,
+                "Startup abandoned chat-run recovery skipped (database unavailable): %s",
+                exc,
             )
+        else:
+            if recovered:
+                logger.warning(
+                    "Startup recovered %s abandoned chat run(s): %s",
+                    len(recovered),
+                    recovered,
+                )
     else:
         logger.warning(
             "pcc_chat_assume_single_worker=false: abandoned chat-run recovery "
