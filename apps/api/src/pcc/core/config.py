@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     pcc_env: str = "development"
     # Phase 1A chat default provider (mock requires no API keys).
     pcc_default_chat_provider: str = "mock"
+    # Gates abandoned-run recovery only — does NOT enforce single-process deploy.
+    # MVP requires exactly one active pcc-api process and no overlapping rolling
+    # instances; violating that can finalize live peer runs as abandoned.
+    pcc_chat_assume_single_worker: bool = True
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @field_validator("database_url", mode="before")

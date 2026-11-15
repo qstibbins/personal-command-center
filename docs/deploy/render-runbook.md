@@ -29,22 +29,43 @@ Destructive / expand-contract migrations need an explicit plan; rollbacks do **n
 
 Agents must not perform steps that purchase or configure live OAuth secrets unless the owner explicitly requests it.
 
-## 3. Routine deploy
+## 3. Chat API worker topology (Phase 1A)
+
+Chat cancel/abort uses an **in-process** registry. MVP requires **exactly one active `pcc-api` process**.
+
+`PCC_CHAT_ASSUME_SINGLE_WORKER=true` (default; set in `render.yaml`) only **gates** abandoned-run recovery. It does **not** enforce single-process deployment or prevent a second worker from starting.
+
+| Constraint | Detail |
+|---|---|
+| Exactly one process | Do not scale `pcc-api` horizontally. |
+| No rolling overlap | Stop the old API process before the new one accepts traffic (or accept brief downtime). Default Render behavior that keeps the previous instance serving while the new deploy becomes healthy creates an **overlap window** where the new process can incorrectly finalize the old process’s live `running` rows. |
+| Multi-worker cancel/recovery | **Unsupported.** Cancel on process B cannot signal process A’s generator; recovery treats peer live runs as abandoned. |
+| Flag alone | Setting `PCC_CHAT_ASSUME_SINGLE_WORKER=false` disables recovery (stuck `running` / 409 risk) without enabling safe multi-worker cancel. |
+
+| Event | Behavior |
+|---|---|
+| Process crash mid-stream | In-flight assistant buffer is lost (by design). On next API start / claim / delete / cancel, abandoned `chat_runs.status='running'` rows with **no** local abort handle are finalized (`cancelled` / `superseded` or `client_stop`) so the one-running unique index is released. |
+| Soft-delete while streaming | **HTTP 409** `run_in_progress` while a live run is active. |
+| Claim vs recovery | Abort handle is registered **before** the `running` row commits so same-process recovery cannot steal a newly claimed live run. |
+
+Recovery never uses wall-clock timeouts to kill a slow but live stream; liveness is “local abort handle present.”
+
+## 4. Routine deploy
 
 1. Merge to the Blueprint-tracked branch.
 2. Render builds Docker images for changed services.
-3. `pcc-api`: build → **`alembic upgrade head`** → start → private network.
+3. `pcc-api`: build → **`alembic upgrade head`** → start → private network (**one instance** for chat).
 4. `pcc-web`: build → health check `/api/health` → public traffic.
 5. Smoke: sign-in, create capture, list Inbox, sign-out.
 
-## 4. Application rollback
+## 5. Application rollback
 
 1. Render Dashboard → service → Deploys → **Rollback** to a prior successful deploy.
 2. Rollback restores the prior **build artifact** / start config for that service; it does **not** reverse Alembic.
 3. If a bad migration already applied, use expand-contract forward fix or **database** recovery (PITR / logical restore)—not app rollback alone.
 4. After emergency rollback, disable auto-deploy until the fix is confirmed (Render rollback does not disable auto-deploy by itself).
 
-## 5. Backup and restore
+## 6. Backup and restore
 
 ### Point-in-time recovery (PITR)
 
@@ -68,7 +89,7 @@ After first real deploy, record in `docs/HANDOFF.md`:
 - [ ] Captures + Auth.js tables present
 - [ ] Timestamp and operator notes
 
-## 6. Cost notes (assumptions — re-check pricing)
+## 7. Cost notes (assumptions — re-check pricing)
 
 | Item | Rough cost | Notes |
 |---|---|---|
@@ -82,7 +103,7 @@ After first real deploy, record in `docs/HANDOFF.md`:
 
 If `pcc-web` OOMs on 512MB RAM, upgrade web to `1c-2g` (~$25/mo class) rather than adding swap hacks.
 
-## 7. Security checklist at deploy time
+## 8. Security checklist at deploy time
 
 - [ ] FastAPI is **private** (`pserv`) — no public URL
 - [ ] `/docs` / `/redoc` / `/openapi.json` return 404 with `PCC_ENV=production`
@@ -91,6 +112,6 @@ If `pcc-web` OOMs on 512MB RAM, upgrade web to `1c-2g` (~$25/mo class) rather th
 - [ ] Postgres ACL private-only
 - [ ] `AUTH_URL` https; Secure cookies in production
 
-## 8. ChatGPT / Milestone 4
+## 9. ChatGPT / Milestone 4
 
 Do **not** expose FastAPI publicly for speculative ChatGPT access. Milestone 4 must verify client support first. A later controlled public authenticated surface may be required; scoped API tokens alone against a private service are not reachable from the internet.

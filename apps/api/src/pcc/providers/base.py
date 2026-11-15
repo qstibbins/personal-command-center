@@ -128,7 +128,10 @@ class ProviderAdapter(Protocol):
 
 
 def collect_stream(events: Iterator[StreamEvent]) -> CompleteResult:
-    """Drain a stream into a ``CompleteResult`` (optional ``complete()`` helper)."""
+    """Drain a stream into a ``CompleteResult`` (optional ``complete()`` helper).
+
+    An earlier ``error`` event wins: later ``message_end`` must not report success.
+    """
     content_parts: list[str] = []
     collected: list[StreamEvent] = []
     usage: UsageInfo | None = None
@@ -144,11 +147,17 @@ def collect_stream(events: Iterator[StreamEvent]) -> CompleteResult:
         elif event_type == "usage":
             usage = event.get("usage")
         elif event_type == "message_end":
-            finish_reason = event.get("finish_reason") or "stop"
-        elif event_type == "error":
+            # Do not let a trailing message_end mask a prior error as success.
+            if error_code is None:
+                finish_reason = event.get("finish_reason") or "stop"
+        elif event_type == "error" and error_code is None:
+            # First error wins for stable error_code / finish_reason.
             error_code = event.get("error_code") or "internal"
             error_message = event.get("message")
             finish_reason = "cancelled" if error_code == "cancelled" else "error"
+
+    if error_code is not None and finish_reason == "stop":
+        finish_reason = "cancelled" if error_code == "cancelled" else "error"
 
     return CompleteResult(
         content="".join(content_parts),
