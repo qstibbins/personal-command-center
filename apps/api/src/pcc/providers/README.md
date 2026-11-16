@@ -36,6 +36,7 @@ Optional: implement `complete()` (or use `collect_stream`) for non-stream caller
 - Output: `Echo: ` + last user message, chunked
 - Usage: `input_tokens = len(joined_messages)//4`, `output_tokens = len(output)//4`, `cost_micros = 0`
 - `MOCK:*` test hooks only when `allow_test_hooks` is true (registry sets this from `pcc_env != production`)
+- Optional `PCC_MOCK_STREAM_TEST=true`: fixed `STREAM-TEST: …` body with timed chunks (~10s) for progressive/Stop validation; default off; independent of `MOCK:*` hooks
 
 ## Adding OpenAI / Anthropic / Gemini later
 

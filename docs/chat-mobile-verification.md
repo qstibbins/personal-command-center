@@ -30,6 +30,22 @@ The following items require a **real iPhone Safari or iOS Simulator** check
 | Streaming layout | Incremental tokens do not cause horizontal scroll or large layout jumps. |
 | Stop | Stop ends generation; partial assistant text remains labeled Interrupted. |
 
+## Deterministic streaming / Stop validation (`PCC_MOCK_STREAM_TEST`)
+
+Normal production mock echo finishes too quickly to observe progressive tokens.
+Use the API env flag documented in [`deploy/render-runbook.md`](deploy/render-runbook.md) §4a.
+
+| Step | Action | Expected |
+|---|---|---|
+| 1 | On **pcc-api**, set `PCC_MOCK_STREAM_TEST=true` and **redeploy** the API | New instance live; `PCC_ENV=production` unchanged |
+| 2 | iPhone: new chat, send short `hi` | Assistant text grows for ~8–12s (`STREAM-TEST: …`) |
+| 3 | Press **Stop** mid-stream | Generation stops; no further growth |
+| 4 | Navigate away and back / refresh | Partial assistant message still stored |
+| 5 | Send another short message | New reply streams; no stuck `run_in_progress` |
+| 6 | Set `PCC_MOCK_STREAM_TEST=false` (or delete) on **pcc-api** and **redeploy** | `hi` returns quick `Echo: hi` again |
+
+Enabling or disabling the flag **requires an API redeploy**. Web rebuild is not required for this flag alone.
+
 ## Out of scope for this checklist
 
 - Real AI providers, model pickers, attachments, PWA install, production multi-process claims.

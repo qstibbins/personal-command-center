@@ -56,4 +56,6 @@ jobs:
       - run: pnpm test:web
       - run: pnpm build:web
       - name: Validate Render Blueprint structure
-        run: python3 scripts/validate_render_blueprint.py
+        run: |
+          python3 scripts/validate_render_blueprint.py
+          python3 scripts/test_validate_render_blueprint.py

@@ -2,6 +2,10 @@
 
 No network, credentials, DB sessions, or auth. Test hooks (``MOCK:*``) are
 gated off when ``allow_test_hooks`` is false (production).
+
+Optional ``stream_test`` mode (env ``PCC_MOCK_STREAM_TEST``) emits a fixed,
+timed assistant reply so progressive streaming and Stop can be validated
+without long user messages. Disabled by default; independent of ``MOCK:*``.
 """
 
 from __future__ import annotations
@@ -29,6 +33,16 @@ DEFAULT_CHUNK_SIZE = 5
 DEFAULT_DELAY_SECONDS = 0.0
 SLOW_DELAY_SECONDS = 0.05
 
+# Fixed stream-test payload (~200 chars). With STREAM_TEST_CHUNK_SIZE=4 and
+# STREAM_TEST_DELAY_SECONDS=0.2 → ~50 chunks ≈ 10s of observable streaming.
+STREAM_TEST_RESPONSE = (
+    "STREAM-TEST: Fixed mock reply for progressive streaming and Stop "
+    "validation. Short user messages still produce this timed output. "
+    "Chunks: 0123456789 ABCDEFGHIJKLMNOPQRSTUVWXYZ — end of stream-test."
+)
+STREAM_TEST_CHUNK_SIZE = 4
+STREAM_TEST_DELAY_SECONDS = 0.2
+
 MockHook = Literal[
     "none",
     "error_rate_limited",
@@ -47,6 +61,7 @@ class MockProvider:
         chunk_size: int = DEFAULT_CHUNK_SIZE,
         delay_seconds: float = DEFAULT_DELAY_SECONDS,
         allow_test_hooks: bool = True,
+        stream_test: bool = False,
         sleep: Callable[[float], None] | None = None,
     ) -> None:
         if chunk_size < 1:
@@ -56,6 +71,7 @@ class MockProvider:
         self._chunk_size = chunk_size
         self._delay_seconds = delay_seconds
         self._allow_test_hooks = allow_test_hooks
+        self._stream_test = stream_test
         self._sleep = sleep if sleep is not None else time.sleep
 
     def id(self) -> str:
@@ -118,12 +134,16 @@ class MockProvider:
             )
             return
 
-        output = f"{ECHO_PREFIX}{payload}"
-        delay = (
-            SLOW_DELAY_SECONDS
-            if hook == "slow" and self._delay_seconds == DEFAULT_DELAY_SECONDS
-            else self._delay_seconds
-        )
+        if self._stream_test and hook == "none":
+            output = STREAM_TEST_RESPONSE
+            delay = self._delay_seconds
+        else:
+            output = f"{ECHO_PREFIX}{payload}"
+            delay = (
+                SLOW_DELAY_SECONDS
+                if hook == "slow" and self._delay_seconds == DEFAULT_DELAY_SECONDS
+                else self._delay_seconds
+            )
 
         emitted_any_delta = False
         for chunk in _chunk_text(output, self._chunk_size):

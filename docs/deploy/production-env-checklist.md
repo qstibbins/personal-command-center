@@ -45,6 +45,8 @@ Optional: `AUTH_DATABASE_URL` if you prefer a dedicated `postgresql://` URL for 
 
 Optional: `PCC_SERVICE_CREDENTIAL_PREVIOUS` during credential rotation (set in Dashboard; not in Blueprint by default).
 
+Optional validation-only: `PCC_MOCK_STREAM_TEST` (`true` / `false`, default unset/`false`). When `true`, mock replies use a fixed ~10s timed stream for iPhone Stop testing. Does **not** enable `MOCK:*` hooks. Leave disabled in steady-state; changing it requires an API redeploy (see `docs/deploy/render-runbook.md` §4a).
+
 ## Google OAuth Console (owner)
 
 After the public hostname is known:

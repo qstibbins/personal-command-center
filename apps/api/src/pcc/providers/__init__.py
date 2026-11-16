@@ -15,12 +15,18 @@ from pcc.providers.base import (
     UsageInfo,
     collect_stream,
 )
-from pcc.providers.mock import MOCK_MODEL_ID, MOCK_PROVIDER_ID, MockProvider
+from pcc.providers.mock import (
+    MOCK_MODEL_ID,
+    MOCK_PROVIDER_ID,
+    STREAM_TEST_RESPONSE,
+    MockProvider,
+)
 from pcc.providers.registry import get_provider, list_registered_provider_ids
 
 __all__ = [
     "MOCK_MODEL_ID",
     "MOCK_PROVIDER_ID",
+    "STREAM_TEST_RESPONSE",
     "ChatMessageDTO",
     "CompleteResult",
     "MockProvider",
