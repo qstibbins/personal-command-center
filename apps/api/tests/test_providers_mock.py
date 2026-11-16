@@ -20,7 +20,12 @@ from pcc.providers import (
     get_provider,
     list_registered_provider_ids,
 )
-from pcc.providers.mock import ECHO_PREFIX
+from pcc.providers.mock import (
+    ECHO_PREFIX,
+    STREAM_TEST_CHUNK_SIZE,
+    STREAM_TEST_DELAY_SECONDS,
+    STREAM_TEST_RESPONSE,
+)
 
 
 def _user(content: str) -> ChatMessageDTO:
@@ -247,6 +252,7 @@ def test_collect_stream_preserves_error_over_later_message_end():
 def test_registry_returns_mock_by_default(monkeypatch):
     monkeypatch.setenv("PCC_ENV", "development")
     monkeypatch.setenv("PCC_DEFAULT_CHAT_PROVIDER", "mock")
+    monkeypatch.delenv("PCC_MOCK_STREAM_TEST", raising=False)
     from pcc.core.config import get_settings
 
     get_settings.cache_clear()
@@ -255,12 +261,15 @@ def test_registry_returns_mock_by_default(monkeypatch):
         assert provider.id() == MOCK_PROVIDER_ID
         assert isinstance(provider, MockProvider)
         assert provider._allow_test_hooks is True
+        assert provider._stream_test is False
+        assert provider._delay_seconds == 0.0
     finally:
         get_settings.cache_clear()
 
 
 def test_registry_disables_hooks_in_production(monkeypatch):
     monkeypatch.setenv("PCC_ENV", "production")
+    monkeypatch.delenv("PCC_MOCK_STREAM_TEST", raising=False)
     from pcc.core.config import get_settings
 
     get_settings.cache_clear()
@@ -268,14 +277,133 @@ def test_registry_disables_hooks_in_production(monkeypatch):
         provider = get_provider("mock")
         assert isinstance(provider, MockProvider)
         assert provider._allow_test_hooks is False
+        assert provider._stream_test is False
     finally:
         get_settings.cache_clear()
+
+
+def test_registry_stream_test_mode_wiring(monkeypatch):
+    monkeypatch.setenv("PCC_ENV", "production")
+    monkeypatch.setenv("PCC_MOCK_STREAM_TEST", "true")
+    from pcc.core.config import get_settings
+
+    get_settings.cache_clear()
+    try:
+        provider = get_provider("mock")
+        assert isinstance(provider, MockProvider)
+        assert provider._stream_test is True
+        assert provider._allow_test_hooks is False
+        assert provider._chunk_size == STREAM_TEST_CHUNK_SIZE
+        assert provider._delay_seconds == STREAM_TEST_DELAY_SECONDS
+    finally:
+        get_settings.cache_clear()
+
+
+def test_stream_test_disabled_by_default_setting(monkeypatch):
+    monkeypatch.delenv("PCC_MOCK_STREAM_TEST", raising=False)
+    from pcc.core.config import get_settings
+
+    get_settings.cache_clear()
+    try:
+        assert get_settings().pcc_mock_stream_test is False
+    finally:
+        get_settings.cache_clear()
+
+
+def test_stream_test_fixed_response_ignores_short_user_message():
+    provider = MockProvider(
+        stream_test=True,
+        chunk_size=STREAM_TEST_CHUNK_SIZE,
+        delay_seconds=0,
+    )
+    events = _stream(provider, _messages("hi"))
+    deltas = [event["delta"] for event in events if event["type"] == "content_delta"]
+    assert "".join(deltas) == STREAM_TEST_RESPONSE
+    assert all(len(delta) <= STREAM_TEST_CHUNK_SIZE for delta in deltas)
+    assert len(deltas) >= 2
+    types = [event["type"] for event in events]
+    assert types[0] == "message_start"
+    assert types[-2] == "usage"
+    assert types[-1] == "message_end"
+
+
+def test_stream_test_ordered_chunks_match_fixed_response():
+    provider = MockProvider(stream_test=True, chunk_size=4, delay_seconds=0)
+    events = _stream(provider, _messages("x"))
+    deltas = [event["delta"] for event in events if event["type"] == "content_delta"]
+    assert "".join(deltas) == STREAM_TEST_RESPONSE
+    rebuilt = ""
+    for delta in deltas:
+        rebuilt += delta
+        assert STREAM_TEST_RESPONSE.startswith(rebuilt)
+
+
+def test_stream_test_cancel_stops_before_completion():
+    sleeps: list[float] = []
+    abort = threading.Event()
+
+    def gated_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        if len(sleeps) >= 2:
+            abort.set()
+
+    provider = MockProvider(
+        stream_test=True,
+        chunk_size=4,
+        delay_seconds=0.2,
+        sleep=gated_sleep,
+    )
+    stream = provider.stream(
+        model=MOCK_MODEL_ID,
+        messages=_messages("hi"),
+        tools=None,
+        temperature=None,
+        max_output_tokens=None,
+        abort=abort,
+    )
+    events = list(stream)
+    text = "".join(
+        event.get("delta", "") for event in events if event["type"] == "content_delta"
+    )
+    assert events[-1]["type"] == "error"
+    assert events[-1]["error_code"] == "cancelled"
+    assert text != STREAM_TEST_RESPONSE
+    assert len(text) < len(STREAM_TEST_RESPONSE)
+    assert not any(event["type"] == "message_end" for event in events)
+
+
+def test_stream_test_keeps_hooks_disabled_in_production_mode():
+    provider = MockProvider(
+        stream_test=True,
+        allow_test_hooks=False,
+        chunk_size=8,
+        delay_seconds=0,
+    )
+    # Hooks off: MOCK:ERROR is ignored; stream-test fixed body is used instead.
+    events = _stream(provider, _messages("MOCK:ERROR:context_overflow"))
+    text = "".join(
+        event.get("delta", "") for event in events if event["type"] == "content_delta"
+    )
+    assert text == STREAM_TEST_RESPONSE
+    assert not any(event["type"] == "error" for event in events)
+
+
+def test_normal_echo_unchanged_when_stream_test_off():
+    events = _stream(
+        MockProvider(stream_test=False, delay_seconds=0),
+        _messages("hello"),
+    )
+    text = "".join(
+        event.get("delta", "") for event in events if event["type"] == "content_delta"
+    )
+    assert text == f"{ECHO_PREFIX}hello"
 
 
 def test_registry_unknown_provider():
     settings = SimpleNamespace(
         pcc_default_chat_provider="mock",
         is_production=False,
+        pcc_mock_stream_test=False,
     )
     with pytest.raises(ValueError, match="Unknown chat provider"):
         get_provider("openai", settings=settings)  # type: ignore[arg-type]

@@ -77,6 +77,44 @@ Recovery never uses wall-clock timeouts to kill a slow but live stream; liveness
 4. `pcc-web`: build → health check `/api/health` → public traffic (zero-downtime OK).
 5. Smoke: sign-in, create capture, list Inbox, sign-out; after API changes also smoke `/chat` create → stream → Stop → refresh.
 
+## 4a. Deterministic mock streaming validation (`PCC_MOCK_STREAM_TEST`)
+
+Use this only for a short iPhone validation window. It does **not** enable `MOCK:*` hooks and does **not** change `PCC_ENV` or OpenAPI lockdown.
+
+| Item | Value |
+|---|---|
+| Variable | `PCC_MOCK_STREAM_TEST` (on **`pcc-api` only**) |
+| Accepted values | unset / `false` (default) = normal `Echo: …` mock; `true` = fixed ~10s timed stream |
+| Default | `false` (disabled) |
+| Effect when `true` | Every mock assistant reply uses a fixed body (`STREAM-TEST: …`), chunked with ~0.2s delay (~8–12s total). Short user messages are enough. |
+| Auth | Unchanged — still Auth.js + BFF + service credential; no new routes |
+| Redeploy | Changing this env on Render requires an **API redeploy** (stop-before-start; brief downtime) |
+
+### Enable (validation window)
+
+1. Render Dashboard → **pcc-api** → Environment → add/set `PCC_MOCK_STREAM_TEST` = `true`.
+2. Confirm `PCC_ENV=production` remains set (docs stay disabled; `MOCK:*` hooks stay off).
+3. **Manual Deploy** / save env so the new API instance boots with the flag.
+4. Wait until the deploy is live (old instance stopped, new healthy).
+
+### iPhone procedure
+
+1. Sign in with the allowlisted Google account; open `/chat` (Safari or Home Screen).
+2. Start a **new** conversation.
+3. Send a **short** message (e.g. `hi`) — do not paste a long prompt.
+4. Confirm assistant text appears **incrementally** for several seconds (not all at once).
+5. Press **Stop** before the reply finishes.
+6. Confirm generation stops promptly; partial text remains and is labeled Interrupted (or equivalent partial state).
+7. Leave the conversation and return (or refresh history) — partial content still present.
+8. Send another short message afterward — it must stream/complete without a stuck `409`.
+
+### Disable (return to normal mock)
+
+1. Render Dashboard → **pcc-api** → Environment → set `PCC_MOCK_STREAM_TEST` = `false` **or delete** the variable.
+2. Redeploy **pcc-api** (required for the process to pick up the change).
+3. Confirm: send `hi` in `/chat` → reply is the quick `Echo: hi` (not the long `STREAM-TEST:` body).
+4. Do not leave `PCC_MOCK_STREAM_TEST=true` in steady-state production.
+
 ## 5. Application rollback
 
 1. Render Dashboard → service → Deploys → **Rollback** to a prior successful deploy.

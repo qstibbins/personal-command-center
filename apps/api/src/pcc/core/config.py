@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     # MVP requires exactly one active pcc-api process and no overlapping rolling
     # instances; violating that can finalize live peer runs as abandoned.
     pcc_chat_assume_single_worker: bool = True
+    # When true, MockProvider emits a fixed-length timed stream for iPhone
+    # Stop/progressive validation. Default false. Does not enable MOCK:* hooks
+    # and must not be left on in steady-state production.
+    pcc_mock_stream_test: bool = False
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     @field_validator("database_url", mode="before")

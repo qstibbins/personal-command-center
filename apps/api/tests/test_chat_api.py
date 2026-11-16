@@ -264,6 +264,94 @@ def test_cancel_run_marks_partial(db_client):
         assert run.cancel_reason == "client_stop"
 
 
+def test_stream_test_mode_cancel_partial_then_next_message(db_client, monkeypatch):
+    """PCC_MOCK_STREAM_TEST: short prompt → timed stream; Stop → partial; next ok."""
+    from pcc.core.config import get_settings
+    from pcc.providers.mock import STREAM_TEST_RESPONSE
+
+    monkeypatch.setenv("PCC_MOCK_STREAM_TEST", "true")
+    monkeypatch.setenv("PCC_ENV", "production")
+    get_settings.cache_clear()
+
+    conv = _create_conversation(db_client)
+    conv_id = conv["id"]
+    cancel_state = {"sleeps": 0, "done": False}
+
+    def cancel_during_sleep(_seconds: float) -> None:
+        # Sleep runs before each delta; cancel on the second sleep so at least
+        # one content_delta was already emitted.
+        cancel_state["sleeps"] += 1
+        if cancel_state["done"] or cancel_state["sleeps"] < 2:
+            return
+        with db_session.SessionLocal() as session:
+            run = session.scalar(select(ChatRun).where(ChatRun.status == "running"))
+            assert run is not None
+            run_id = run.id
+        cancel_state["done"] = True
+        response = db_client.post(
+            f"/api/v1/chat/runs/{run_id}/cancel",
+            json={"owner_email": OWNER},
+        )
+        assert response.status_code == 200
+
+    with (
+        mock.patch("pcc.providers.mock.time.sleep", side_effect=cancel_during_sleep),
+        db_client.stream(
+            "POST",
+            f"/api/v1/chat/conversations/{conv_id}/messages",
+            json={"owner_email": OWNER, "content": "hi"},
+        ) as response,
+    ):
+        body = "".join(response.iter_text())
+
+    events = _parse_sse(body)
+    assert any(name == "error" and payload.get("code") == "cancelled" for name, payload in events)
+    deltas = "".join(
+        payload.get("delta", "")
+        for name, payload in events
+        if name == "content_delta"
+    )
+    assert deltas
+    assert deltas != STREAM_TEST_RESPONSE
+    assert STREAM_TEST_RESPONSE.startswith(deltas)
+
+    history = db_client.get(
+        f"/api/v1/chat/conversations/{conv_id}/messages",
+        params={"owner_email": OWNER},
+    ).json()
+    assert history[-1]["role"] == "assistant"
+    assert history[-1]["status"] == "partial"
+    assert history[-1]["content_text"] == deltas
+
+    with db_session.SessionLocal() as session:
+        run = session.scalar(
+            select(ChatRun).where(ChatRun.response_message_id == uuid.UUID(history[-1]["id"]))
+        )
+        assert run is not None
+        assert run.status == "cancelled"
+        assert run.cancel_reason == "client_stop"
+
+    # Subsequent turn must succeed (finish full stream-test body quickly).
+    with (
+        mock.patch("pcc.providers.mock.time.sleep", return_value=None),
+        db_client.stream(
+            "POST",
+            f"/api/v1/chat/conversations/{conv_id}/messages",
+            json={"owner_email": OWNER, "content": "again"},
+        ) as response,
+    ):
+        second_body = "".join(response.iter_text())
+
+    second_events = _parse_sse(second_body)
+    assert any(name == "message_end" for name, _ in second_events)
+    second_history = db_client.get(
+        f"/api/v1/chat/conversations/{conv_id}/messages",
+        params={"owner_email": OWNER},
+    ).json()
+    assert second_history[-1]["status"] == "complete"
+    assert second_history[-1]["content_text"] == STREAM_TEST_RESPONSE
+
+
 def test_cancel_idempotent_when_terminal(db_client):
     conv = _create_conversation(db_client)
     conv_id = conv["id"]
