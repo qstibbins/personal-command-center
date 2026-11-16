@@ -11,6 +11,11 @@
 #
 # Secrets: never hardcode. sync:false prompts in Dashboard; generateValue
 # creates a platform secret once. Google OAuth values stay owner-provided.
+#
+# Chat deploy safety (ADR 0005): pcc-api attaches a 1 GB unused disk so Render
+# uses stop-before-start deploys (no old/new process overlap). numInstances: 1
+# alone does not prevent zero-downtime overlap. Applying this Blueprint does
+# not complete M3.5c or make chat production-ready.
 
 services:
   - type: web
@@ -62,14 +67,25 @@ services:
     region: oregon
     dockerfilePath: ./apps/api/Dockerfile
     dockerContext: ./apps/api
+    # Pin single instance. A disk also prevents horizontal scale-out.
+    numInstances: 1
+    # Unused mount: forces Render stop-before-start (disables zero-downtime
+    # overlap). App does not read/write this path. sizeGB cannot shrink later.
+    disk:
+      name: pcc-api-deploy-anchor
+      mountPath: /var/pcc-deploy-anchor
+      sizeGB: 1
     # Single migration owner — do not also migrate from the web service.
-    # Failure cancels the new deploy; the previous API instance keeps serving.
+    # If pre-deploy fails, Render cancels before the instance swap; the
+    # previous healthy API instance keeps serving. After a successful
+    # pre-deploy, disk-backed swap stops the old instance before starting
+    # the new one (brief downtime; see docs/deploy/render-runbook.md).
     #
     # Chat MVP hard requirements (abort/recovery are process-local):
     # - Exactly one active pcc-api process (do not scale horizontally).
-    # - No overlapping API processes during rolling deploys (stop-old-before-
-    #   start-new / accept brief downtime). Default zero-downtime overlap is
-    #   unsafe: the new process can finalize the old process's live runs.
+    # - No overlapping API processes during deploys (disk enforces
+    #   stop-old-before-start-new). Default zero-downtime without a disk
+    #   is unsafe: the new process can finalize the old process's live runs.
     # - PCC_CHAT_ASSUME_SINGLE_WORKER only gates recovery; it does not enforce
     #   single-process topology. Multi-worker cancel/recovery is unsupported.
     preDeployCommand: alembic upgrade head
@@ -92,5 +108,9 @@ databases:
     plan: 0.1c-256mb
     region: oregon
     postgresMajorVersion: "16"
+    # Smallest Blueprint-valid size (1 or multiple of 5). Omitting defaults
+    # to 15 GB for this plan and bills storage separately (~$0.30/GB/mo).
+    # Cannot decrease later.
+    diskSizeGB: 1
     # Private network only — no public 0.0.0.0/0 access.
     ipAllowList: []
