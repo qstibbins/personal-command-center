@@ -1,6 +1,6 @@
 # Render deployment runbook (Milestone 3.5b)
 
-Companion to ADR 0004. This runbook is preparation only until the owner provisions a Render workspace.
+Companion to ADR 0004. This runbook is preparation only until the owner provisions a Render workspace. Applying the Blueprint or merging this document does **not** complete Milestone 3.5c and does **not** make PCC Chat production-ready.
 
 ## 1. Migration ownership and sequencing
 
@@ -9,7 +9,7 @@ Companion to ADR 0004. This runbook is preparation only until the owner provisio
 | **Owner** | Alembic in `apps/api` (revisions through `0005_chat_schema`, including Auth.js, `api_tokens`, and chat tables) |
 | **When** | `pcc-api` `preDeployCommand`: `alembic upgrade head` |
 | **Who must not migrate** | `pcc-web` — no migration command (avoids concurrent Alembic) |
-| **Failure behavior** | If pre-deploy exits non-zero, Render **cancels** that API deploy; the previous healthy API instance keeps serving |
+| **Failure behavior (pre-deploy)** | If pre-deploy exits non-zero, Render **cancels** that API deploy **before** the instance swap; the previous healthy API instance keeps serving |
 | **Web dependency** | Auth.js needs `users` / `sessions` / … tables. Prefer **API deploy (with migrate) before relying on a fresh web instance** on first cutover |
 | **Auto-deploy race** | Same-commit auto-deploys of web + API can race. For first production cutover, deploy/sync API first and confirm `/api/v1/ready`, then ensure web is live. For later schema changes that Auth.js needs, ship expand-only migrations before web code that depends on them |
 
@@ -18,7 +18,7 @@ Destructive / expand-contract migrations need an explicit plan; rollbacks do **n
 ## 2. First-time owner cutover (high level)
 
 1. Create Render Hobby workspace + payment method (paid compute; no Free Postgres).
-2. Apply Blueprint from repo `render.yaml` (**creates billable resources**).
+2. Apply Blueprint from repo `render.yaml` (**creates billable resources**). Confirm `pcc-api` has the 1 GB deploy-anchor disk and `pcc-db` storage is 1 GB (or raise intentionally — storage cannot shrink).
 3. Fill Dashboard prompts: `AUTH_URL`, Google OAuth ID/secret, `PCC_ALLOWED_GOOGLE_EMAILS`.
 4. Confirm `PCC_SERVICE_CREDENTIAL` is shared (Blueprint wires web ← api).
 5. Confirm DB region matches services; ACL remains private-only.
@@ -39,10 +39,27 @@ Chat cancel/abort uses an **in-process** registry. MVP requires **exactly one ac
 
 | Constraint | Detail |
 |---|---|
-| Exactly one process | Do not scale `pcc-api` horizontally. |
-| No rolling overlap | Stop the old API process before the new one accepts traffic (or accept brief downtime). Default Render behavior that keeps the previous instance serving while the new deploy becomes healthy creates an **overlap window** where the new process can incorrectly finalize the old process’s live `running` rows. |
+| Exactly one process | `numInstances: 1` in Blueprint; do not scale `pcc-api` horizontally. The attached disk also prevents multi-instance scale-out. |
+| No rolling overlap | **Mandatory:** `pcc-api` attaches a 1 GB unused persistent disk (`/var/pcc-deploy-anchor`) so Render uses **stop-before-start** deploys. Without a disk, default zero-downtime keeps the previous instance serving while the new one becomes healthy — an **overlap window** where the new process can incorrectly finalize the old process’s live `running` rows. Instance count alone does **not** remove that window. |
 | Multi-worker cancel/recovery | **Unsupported.** Cancel on process B cannot signal process A’s generator; recovery treats peer live runs as abandoned. |
 | Flag alone | Setting `PCC_CHAT_ASSUME_SINGLE_WORKER=false` disables recovery (stuck `running` / 409 risk) without enabling safe multi-worker cancel. |
+
+### Why the `pcc-api` disk is mandatory
+
+- Abort handles live only in the current process memory.
+- On startup (and on claim/cancel/delete paths), recovery finalizes any `chat_runs.status='running'` row that has **no** local abort handle.
+- During a zero-downtime overlap, the new process has an empty handle table and can cancel streams still alive on the old process.
+- Render documents that attaching a persistent disk **disables** zero-downtime deploys: it **stops the existing instance before bringing up the new one** (brief unavailability). PCC mounts an unused path solely for that deploy behavior; the app does not depend on disk data.
+
+### Expected downtime and failure / rollback (disk-backed `pcc-api`)
+
+| Phase | Behavior |
+|---|---|
+| Pre-deploy fails | Deploy cancelled; **previous** API instance keeps serving (no swap yet). |
+| Successful pre-deploy + swap | Old instance **stops**, then new starts — expect **brief API downtime** (docs: “a few seconds”; cold start may be longer). In-flight SSE/chat requests fail open until the new process is ready. |
+| New instance fails after old stopped | Use Manual Deploy or Rollback to a prior successful **build**; practice once at cutover. Do not assume the old process is still up. |
+| Application Rollback | Restores prior build/start config for that service; **does not** reverse Alembic. Bad migrations need forward fix or database recovery. |
+| `pcc-web` | Keep default zero-downtime (no disk). Chat hazard is API overlap, not web overlap. |
 
 | Event | Behavior |
 |---|---|
@@ -56,9 +73,9 @@ Recovery never uses wall-clock timeouts to kill a slow but live stream; liveness
 
 1. Merge to the Blueprint-tracked branch.
 2. Render builds Docker images for changed services.
-3. `pcc-api`: build → **`alembic upgrade head`** → start → private network (**one instance** for chat).
-4. `pcc-web`: build → health check `/api/health` → public traffic.
-5. Smoke: sign-in, create capture, list Inbox, sign-out.
+3. `pcc-api`: build → **`alembic upgrade head`** → **stop old → start new** (disk) → private network (**one instance** for chat). Prefer deploying when no long-running chat streams are intentional.
+4. `pcc-web`: build → health check `/api/health` → public traffic (zero-downtime OK).
+5. Smoke: sign-in, create capture, list Inbox, sign-out; after API changes also smoke `/chat` create → stream → Stop → refresh.
 
 ## 5. Application rollback
 
@@ -66,6 +83,7 @@ Recovery never uses wall-clock timeouts to kill a slow but live stream; liveness
 2. Rollback restores the prior **build artifact** / start config for that service; it does **not** reverse Alembic.
 3. If a bad migration already applied, use expand-contract forward fix or **database** recovery (PITR / logical restore)—not app rollback alone.
 4. After emergency rollback, disable auto-deploy until the fix is confirmed (Render rollback does not disable auto-deploy by itself).
+5. For disk-backed `pcc-api`, expect brief downtime on rollback deploys as well (same stop-before-start path).
 
 ## 6. Backup and restore
 
@@ -97,13 +115,17 @@ After first real deploy, record in `docs/HANDOFF.md`:
 |---|---|---|
 | Web `0.5c-512mb` | ~$7/mo | Always-on; Node `max-old-space-size=384` |
 | Private API `0.5c-512mb` | ~$7/mo | No free private-service tier |
-| Postgres `0.1c-256mb` | ~$6/mo + storage | Avoid Free (expiry / no PITR) |
-| **Steady floor** | **~$20/mo** | Plus bandwidth over Hobby allotment |
+| Postgres `0.1c-256mb` **compute** | ~$6/mo | Avoid Free (expiry / no PITR) |
+| Postgres **storage** | ~$0.30/GB/mo | Blueprint sets `diskSizeGB: 1` (~$0.30). Omitting defaults to **15 GB** for this plan (~$4.50). Storage cannot shrink after create. |
+| `pcc-api` deploy-anchor disk | ~$0.25/GB/mo | Blueprint `sizeGB: 1` (~$0.25). Mandatory for stop-before-start; unused by app. |
+| **Steady floor (tight storage)** | **~$20.55/mo** | $7 + $7 + $6 + $0.25 + ~$0.30; plus bandwidth over Hobby allotment |
 | Docker **build** minutes | Platform build pipeline | Builds consume build time/resources separate from runtime; heavy Next.js builds may need retries or a larger runtime plan if the running service OOMs |
 | **PITR recovery instance** | Same class as DB plan while alive | Delete after cutover or drill |
 | Redis / worker | $0 in v0.1 | Deferred |
 
 If `pcc-web` OOMs on 512MB RAM, upgrade web to `1c-2g` (~$25/mo class) rather than adding swap hacks.
+
+Re-check [render.com/pricing](https://render.com/pricing) before purchasing. This table does not imply M3.5c is complete.
 
 ## 8. Security checklist at deploy time
 
@@ -113,6 +135,7 @@ If `pcc-web` OOMs on 512MB RAM, upgrade web to `1c-2g` (~$25/mo class) rather th
 - [ ] Google allowlist set; non-allowlisted accounts denied
 - [ ] Postgres ACL private-only
 - [ ] `AUTH_URL` https; Secure cookies in production
+- [ ] `pcc-api` still has the deploy-anchor disk and instance count 1
 
 ## 9. ChatGPT / Milestone 4
 
